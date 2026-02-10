@@ -1,0 +1,29 @@
+# Env
+.env
+.env.*
+!.env.example
+
+# PHP
+/vendor/
+
+# Logs / runtime
+/storage/logs/*
+!/storage/logs/.gitignore
+/storage/cache/*
+!/storage/cache/.gitignore
+*.log
+
+# Uploads
+/public/uploads/*
+!/public/uploads/.gitignore
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker local overrides
+/docker-compose.override.yml

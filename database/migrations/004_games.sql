@@ -1,0 +1,19 @@
+CREATE TABLE IF NOT EXISTS games (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(80) NOT NULL,
+  slug VARCHAR(120) NOT NULL,
+  image_path VARCHAR(255) NOT NULL,
+  image_width INT UNSIGNED NOT NULL,
+  image_height INT UNSIGNED NOT NULL,
+  image_mime VARCHAR(64) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_games_slug (slug),
+  UNIQUE KEY uniq_games_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE tournaments
+  ADD COLUMN game_id BIGINT UNSIGNED NULL AFTER owner_user_id,
+  ADD KEY idx_tournaments_game_id (game_id),
+  ADD CONSTRAINT fk_tournaments_game FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE SET NULL;

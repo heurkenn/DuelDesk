@@ -1,0 +1,119 @@
+<?php
+
+declare(strict_types=1);
+
+namespace DuelDesk\Controllers;
+
+use DuelDesk\Http\Response;
+use DuelDesk\Repositories\PlayerRepository;
+use DuelDesk\Repositories\TournamentPlayerRepository;
+use DuelDesk\Repositories\TournamentRepository;
+use DuelDesk\Support\Auth;
+use DuelDesk\Support\Csrf;
+use DuelDesk\Support\Flash;
+
+final class TournamentSignupController
+{
+    /** @param array<string, string> $params */
+    public function signup(array $params = []): void
+    {
+        Auth::requireLogin();
+
+        if (!Csrf::validate($_POST['csrf_token'] ?? null)) {
+            Response::badRequest('Invalid CSRF token');
+        }
+        Csrf::rotate();
+
+        $tournamentId = (int)($params['id'] ?? 0);
+        if ($tournamentId <= 0) {
+            Response::notFound();
+        }
+
+        $tRepo = new TournamentRepository();
+        $t = $tRepo->findById($tournamentId);
+        if ($t === null) {
+            Response::notFound();
+        }
+
+        if (($t['participant_type'] ?? 'solo') === 'team') {
+            Flash::set('error', 'Tournoi en equipe: cree ou rejoins une equipe.');
+            Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $status = (string)($t['status'] ?? 'draft');
+        $isOpen = in_array($status, ['published', 'running'], true);
+
+        if (!$isOpen && !Auth::isAdmin()) {
+            Flash::set('error', 'Inscriptions fermees.');
+            Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $me = Auth::user();
+        $meId = Auth::id();
+        if ($meId === null || $me === null) {
+            Response::badRequest('Not authenticated');
+        }
+
+        $handle = (string)($me['username'] ?? 'player');
+
+        $pRepo = new PlayerRepository();
+        $playerId = $pRepo->ensureForUser($meId, $handle);
+
+        $tpRepo = new TournamentPlayerRepository();
+        $tpRepo->add($tournamentId, $playerId);
+
+        Flash::set('success', 'Inscription enregistree.');
+        Response::redirect('/tournaments/' . $tournamentId);
+    }
+
+    /** @param array<string, string> $params */
+    public function withdraw(array $params = []): void
+    {
+        Auth::requireLogin();
+
+        if (!Csrf::validate($_POST['csrf_token'] ?? null)) {
+            Response::badRequest('Invalid CSRF token');
+        }
+        Csrf::rotate();
+
+        $tournamentId = (int)($params['id'] ?? 0);
+        if ($tournamentId <= 0) {
+            Response::notFound();
+        }
+
+        $tRepo = new TournamentRepository();
+        $t = $tRepo->findById($tournamentId);
+        if ($t === null) {
+            Response::notFound();
+        }
+
+        if (($t['participant_type'] ?? 'solo') === 'team') {
+            Flash::set('error', 'Tournoi en equipe: quitte ton equipe.');
+            Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $status = (string)($t['status'] ?? 'draft');
+        if ($status === 'completed' && !Auth::isAdmin()) {
+            Flash::set('error', 'Tournoi termine.');
+            Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $meId = Auth::id();
+        if ($meId === null) {
+            Response::badRequest('Not authenticated');
+        }
+
+        $pRepo = new PlayerRepository();
+        $p = $pRepo->findByUserId($meId);
+        if ($p === null) {
+            Flash::set('error', "Tu n'es pas inscrit.");
+            Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $tpRepo = new TournamentPlayerRepository();
+        $tpRepo->remove($tournamentId, (int)$p['id']);
+
+        Flash::set('success', 'Inscription annulee.');
+        Response::redirect('/tournaments/' . $tournamentId);
+    }
+}
