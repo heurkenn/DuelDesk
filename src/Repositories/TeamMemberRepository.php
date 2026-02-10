@@ -90,6 +90,15 @@ final class TeamMemberRepository
         return (bool)$stmt->fetchColumn();
     }
 
+    public function isCaptain(int $teamId, int $userId): bool
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT 1 FROM team_members WHERE team_id = :tid AND user_id = :uid AND role = 'captain' LIMIT 1"
+        );
+        $stmt->execute(['tid' => $teamId, 'uid' => $userId]);
+        return (bool)$stmt->fetchColumn();
+    }
+
     /** @return array<string, mixed>|null */
     public function findTeamForUserInTournament(int $tournamentId, int $userId): ?array
     {
@@ -160,5 +169,24 @@ final class TeamMemberRepository
 
         return $uid;
     }
-}
 
+    public function setCaptain(int $teamId, int $userId): void
+    {
+        $this->pdo->beginTransaction();
+
+        try {
+            $this->pdo->prepare("UPDATE team_members SET role = 'member' WHERE team_id = :tid")->execute(['tid' => $teamId]);
+
+            $stmt = $this->pdo->prepare("UPDATE team_members SET role = 'captain' WHERE team_id = :tid AND user_id = :uid");
+            $stmt->execute(['tid' => $teamId, 'uid' => $userId]);
+            if ($stmt->rowCount() <= 0) {
+                throw new \RuntimeException('Target user is not in the team');
+            }
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+}

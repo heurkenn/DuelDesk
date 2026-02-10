@@ -40,11 +40,8 @@ final class DemoSeeder
             throw new RuntimeException('password_hash failed');
         }
 
-        $adminId = $this->firstAdminId();
-        if ($adminId <= 0) {
-            $adminId = $this->ensureUser('admin', $pwHash, 'admin');
-            fwrite(STDOUT, "Created admin user: admin / password123\n");
-        }
+        // Always ensure a deterministic demo admin user exists (useful for smoke tests).
+        $adminId = $this->ensureUser('dd_admin', $pwHash, 'admin');
 
         $imgW = $this->envInt('GAME_IMAGE_WIDTH', 512);
         $imgH = $this->envInt('GAME_IMAGE_HEIGHT', 512);
@@ -99,14 +96,8 @@ final class DemoSeeder
         fwrite(STDOUT, " - /tournaments/{$tSolo} (solo DE, users dd_solo_01..08)\n");
         fwrite(STDOUT, " - /tournaments/{$tTeam} (team DE 2v2, users dd_team2_01..16)\n");
         fwrite(STDOUT, " - /tournaments/{$tCs2} (CS2 team DE 5v5, users dd_cs2_01..20)\n");
+        fwrite(STDOUT, "Admin demo user: dd_admin (role admin)\n");
         fwrite(STDOUT, "Password for all demo users: password123\n");
-    }
-
-    private function firstAdminId(): int
-    {
-        $id = $this->pdo->query("SELECT id FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1")->fetchColumn();
-        $id = is_int($id) || is_string($id) ? (int)$id : 0;
-        return $id > 0 ? $id : 0;
     }
 
     private function ensureUser(string $username, string $pwHash, string $role = 'user'): int
@@ -327,4 +318,3 @@ $pdo = Db::pdo();
 
 $seeder = new DemoSeeder($pdo);
 $seeder->run();
-

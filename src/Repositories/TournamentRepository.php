@@ -43,6 +43,21 @@ final class TournamentRepository
         return is_array($row) ? $row : null;
     }
 
+    /** @return array<string, mixed>|null */
+    public function findBySlug(string $slug): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT t.*, g.image_path AS game_image_path'
+            . ' FROM tournaments t'
+            . ' LEFT JOIN games g ON g.id = t.game_id'
+            . ' WHERE t.slug = :slug'
+            . ' LIMIT 1'
+        );
+        $stmt->execute(['slug' => $slug]);
+        $row = $stmt->fetch();
+        return is_array($row) ? $row : null;
+    }
+
     public function countAll(): int
     {
         return (int)$this->pdo->query('SELECT COUNT(*) FROM tournaments')->fetchColumn();
@@ -79,12 +94,15 @@ final class TournamentRepository
         string $participantType,
         ?int $teamSize,
         string $status,
-        ?string $startsAt
+        ?string $startsAt,
+        ?int $maxEntrants = null,
+        ?string $signupClosesAt = null,
+        int $bestOfDefault = 3
     ): int
     {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO tournaments (owner_user_id, game_id, name, slug, game, format, participant_type, team_size, status, starts_at)'
-            . ' VALUES (:owner_user_id, :game_id, :name, :slug, :game, :format, :participant_type, :team_size, :status, :starts_at)'
+            'INSERT INTO tournaments (owner_user_id, game_id, name, slug, game, format, participant_type, team_size, status, starts_at, max_entrants, signup_closes_at, best_of_default)'
+            . ' VALUES (:owner_user_id, :game_id, :name, :slug, :game, :format, :participant_type, :team_size, :status, :starts_at, :max_entrants, :signup_closes_at, :best_of_default)'
         );
 
         $slug = $this->uniqueSlug($name);
@@ -100,19 +118,27 @@ final class TournamentRepository
             'team_size' => $teamSize,
             'status' => $status,
             'starts_at' => $startsAt,
+            'max_entrants' => $maxEntrants,
+            'signup_closes_at' => $signupClosesAt,
+            'best_of_default' => $bestOfDefault,
         ]);
 
         return (int)$this->pdo->lastInsertId();
     }
 
-    public function updateSettings(int $tournamentId, string $status, ?string $startsAt): void
+    public function updateSettings(int $tournamentId, string $status, ?string $startsAt, ?int $maxEntrants = null, ?string $signupClosesAt = null, int $bestOfDefault = 3): void
     {
         $stmt = $this->pdo->prepare(
-            'UPDATE tournaments SET status = :status, starts_at = :starts_at WHERE id = :id'
+            'UPDATE tournaments'
+            . ' SET status = :status, starts_at = :starts_at, max_entrants = :max_entrants, signup_closes_at = :signup_closes_at, best_of_default = :best_of_default'
+            . ' WHERE id = :id'
         );
         $stmt->execute([
             'status' => $status,
             'starts_at' => $startsAt,
+            'max_entrants' => $maxEntrants,
+            'signup_closes_at' => $signupClosesAt,
+            'best_of_default' => $bestOfDefault,
             'id' => $tournamentId,
         ]);
     }

@@ -66,7 +66,7 @@ final class AdminTournamentController
         $matchCount = $mRepo->countForTournament($tournamentId);
         $format = (string)($t['format'] ?? 'single_elim');
         $participantCount = $participantType === 'team' ? count($teams) : count($players);
-        $supportedFormat = in_array($format, ['single_elim', 'double_elim'], true);
+        $supportedFormat = in_array($format, ['single_elim', 'double_elim', 'round_robin'], true);
         $canGenerateBracket = $supportedFormat && ($matchCount === 0) && ($participantCount >= 2);
 
         $incompleteTeams = [];
@@ -109,6 +109,9 @@ final class AdminTournamentController
             'teamMembers' => $teamMembers,
             'csrfToken' => Csrf::token(),
             'startsAtValue' => $this->toDatetimeLocal($t['starts_at'] ?? null),
+            'maxEntrantsValue' => $t['max_entrants'] !== null ? (string)(int)$t['max_entrants'] : '',
+            'signupClosesValue' => $this->toDatetimeLocal($t['signup_closes_at'] ?? null),
+            'bestOfDefaultValue' => (string)(int)($t['best_of_default'] ?? 3),
             'matchCount' => $matchCount,
             'canGenerateBracket' => $canGenerateBracket,
             'incompleteTeams' => $incompleteTeams,
@@ -133,6 +136,9 @@ final class AdminTournamentController
 
         $status = (string)($_POST['status'] ?? '');
         $startsAtRaw = (string)($_POST['starts_at'] ?? '');
+        $maxEntrantsRaw = trim((string)($_POST['max_entrants'] ?? ''));
+        $signupClosesAtRaw = (string)($_POST['signup_closes_at'] ?? '');
+        $bestOfRaw = trim((string)($_POST['best_of_default'] ?? '3'));
 
         $statuses = ['draft', 'published', 'running', 'completed'];
         if (!in_array($status, $statuses, true)) {
@@ -146,13 +152,45 @@ final class AdminTournamentController
             Response::redirect('/admin/tournaments/' . $tournamentId);
         }
 
+        $maxEntrants = null;
+        if ($maxEntrantsRaw !== '') {
+            if (!ctype_digit($maxEntrantsRaw)) {
+                Flash::set('error', 'Max entrants invalide.');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+            $maxEntrants = (int)$maxEntrantsRaw;
+            if ($maxEntrants <= 0) {
+                $maxEntrants = null;
+            } elseif ($maxEntrants < 2 || $maxEntrants > 1024) {
+                Flash::set('error', 'Max entrants invalide (2 a 1024).');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+        }
+
+        $signupClosesAt = $this->normalizeStartsAt($signupClosesAtRaw);
+        if ($signupClosesAtRaw !== '' && $signupClosesAt === null) {
+            Flash::set('error', 'Date de fermeture invalide.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        $bestOfDefault = 3;
+        if ($bestOfRaw === '' || !ctype_digit($bestOfRaw)) {
+            Flash::set('error', 'Best-of invalide.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+        $bestOfDefault = (int)$bestOfRaw;
+        if (!in_array($bestOfDefault, [1, 3, 5, 7, 9], true)) {
+            Flash::set('error', 'Best-of invalide (1/3/5/7/9).');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
         $tRepo = new TournamentRepository();
         $t = $tRepo->findById($tournamentId);
         if ($t === null) {
             Response::notFound();
         }
 
-        $tRepo->updateSettings($tournamentId, $status, $startsAt);
+        $tRepo->updateSettings($tournamentId, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault);
 
         Flash::set('success', 'Parametres mis a jour.');
         Response::redirect('/admin/tournaments/' . $tournamentId);
@@ -467,8 +505,8 @@ final class AdminTournamentController
         }
 
         $format = (string)($t['format'] ?? 'single_elim');
-        if (!in_array($format, ['single_elim', 'double_elim'], true)) {
-            Flash::set('error', 'Generation disponible uniquement pour single_elim / double_elim.');
+        if (!in_array($format, ['single_elim', 'double_elim', 'round_robin'], true)) {
+            Flash::set('error', 'Generation disponible uniquement pour single_elim / double_elim / round_robin.');
             Response::redirect('/admin/tournaments/' . $tournamentId);
         }
 
@@ -540,11 +578,17 @@ final class AdminTournamentController
         }
 
         $gen = new BracketGenerator();
+        $bestOf = (int)($t['best_of_default'] ?? 3);
+        if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+            $bestOf = 3;
+        }
         try {
             if ($format === 'double_elim') {
-                $gen->generateDoubleElim($tournamentId, $participantType);
+                $gen->generateDoubleElim($tournamentId, $participantType, $bestOf);
+            } elseif ($format === 'round_robin') {
+                $gen->generateRoundRobin($tournamentId, $participantType, $bestOf);
             } else {
-                $gen->generateSingleElim($tournamentId, $participantType);
+                $gen->generateSingleElim($tournamentId, $participantType, $bestOf);
             }
         } catch (Throwable $e) {
             Flash::set('error', $e->getMessage());
@@ -580,6 +624,108 @@ final class AdminTournamentController
         $mRepo->deleteForTournament($tournamentId);
 
         Flash::set('success', 'Bracket reset (matchs supprimes).');
+        Response::redirect('/admin/tournaments/' . $tournamentId);
+    }
+
+    /** @param array<string, string> $params */
+    public function scheduleMatch(array $params = []): void
+    {
+        Auth::requireAdmin();
+
+        if (!Csrf::validate($_POST['csrf_token'] ?? null)) {
+            Response::badRequest('Invalid CSRF token');
+        }
+        Csrf::rotate();
+
+        $tournamentId = (int)($params['id'] ?? 0);
+        $matchId = (int)($params['matchId'] ?? 0);
+        if ($tournamentId <= 0 || $matchId <= 0) {
+            Response::notFound();
+        }
+
+        $tRepo = new TournamentRepository();
+        $t = $tRepo->findById($tournamentId);
+        if ($t === null) {
+            Response::notFound();
+        }
+
+        $mRepo = new MatchRepository();
+        $match = $mRepo->findById($matchId);
+        if ($match === null || (int)($match['tournament_id'] ?? 0) !== $tournamentId) {
+            Response::notFound();
+        }
+
+        $raw = (string)($_POST['scheduled_at'] ?? '');
+        $scheduledAt = $this->normalizeStartsAt($raw);
+        if ($raw !== '' && $scheduledAt === null) {
+            Flash::set('error', 'Horaire invalide.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        $st = (string)($match['status'] ?? 'pending');
+        $newStatus = null;
+        if ($st !== 'confirmed') {
+            if ($scheduledAt !== null && $st === 'pending') {
+                $newStatus = 'scheduled';
+            } elseif ($scheduledAt === null && $st === 'scheduled') {
+                $newStatus = 'pending';
+            }
+        }
+
+        $mRepo->setSchedule($matchId, $scheduledAt, $newStatus);
+
+        Flash::set('success', $scheduledAt !== null ? 'Match planifie.' : 'Horaire efface.');
+        Response::redirect('/admin/tournaments/' . $tournamentId);
+    }
+
+    /** @param array<string, string> $params */
+    public function setBestOf(array $params = []): void
+    {
+        Auth::requireAdmin();
+
+        if (!Csrf::validate($_POST['csrf_token'] ?? null)) {
+            Response::badRequest('Invalid CSRF token');
+        }
+        Csrf::rotate();
+
+        $tournamentId = (int)($params['id'] ?? 0);
+        $matchId = (int)($params['matchId'] ?? 0);
+        if ($tournamentId <= 0 || $matchId <= 0) {
+            Response::notFound();
+        }
+
+        $tRepo = new TournamentRepository();
+        $t = $tRepo->findById($tournamentId);
+        if ($t === null) {
+            Response::notFound();
+        }
+
+        $mRepo = new MatchRepository();
+        $match = $mRepo->findById($matchId);
+        if ($match === null || (int)($match['tournament_id'] ?? 0) !== $tournamentId) {
+            Response::notFound();
+        }
+
+        if (($match['status'] ?? 'pending') === 'confirmed') {
+            Flash::set('error', 'Match deja confirme (BO non modifiable).');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        $raw = trim((string)($_POST['best_of'] ?? ''));
+        if ($raw === '' || !ctype_digit($raw)) {
+            Flash::set('error', 'Best-of invalide.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        $bestOf = (int)$raw;
+        if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+            Flash::set('error', 'Best-of invalide (1/3/5/7/9).');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        $mRepo->setBestOf($matchId, $bestOf);
+
+        Flash::set('success', 'Best-of du match mis a jour.');
         Response::redirect('/admin/tournaments/' . $tournamentId);
     }
 
@@ -640,6 +786,44 @@ final class AdminTournamentController
             Response::redirect('/admin/tournaments/' . $tournamentId);
         }
 
+        // Best-of validation (soft): if scores look like a series (<= BO), enforce "first to X wins".
+        $bestOf = (int)($match['best_of'] ?? 0);
+        if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+            $bestOf = (int)($t['best_of_default'] ?? 3);
+        }
+        if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+            $bestOf = 3;
+        }
+
+        $winsToTake = intdiv($bestOf, 2) + 1;
+        $looksLikeSeries = ($score1 <= $bestOf) && ($score2 <= $bestOf);
+
+        // Always require winner to have a strictly higher score.
+        if ($winnerSlot === '1' && $score1 <= $score2) {
+            Flash::set('error', 'Score incoherent: winner=A mais scoreA <= scoreB.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+        if ($winnerSlot === '2' && $score2 <= $score1) {
+            Flash::set('error', 'Score incoherent: winner=B mais scoreB <= scoreA.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        // If it looks like a BO series, require majority wins.
+        if ($looksLikeSeries) {
+            if ($winnerSlot === '1' && $score1 !== $winsToTake) {
+                Flash::set('error', "Score BO{$bestOf} incoherent: il faut {$winsToTake} victoire(s) pour gagner.");
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+            if ($winnerSlot === '2' && $score2 !== $winsToTake) {
+                Flash::set('error', "Score BO{$bestOf} incoherent: il faut {$winsToTake} victoire(s) pour gagner.");
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+            if ($score1 >= $winsToTake && $score2 >= $winsToTake) {
+                Flash::set('error', "Score BO{$bestOf} incoherent: les deux cotes ne peuvent pas atteindre {$winsToTake}.");
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+        }
+
         $bracket = (string)($match['bracket'] ?? 'winners');
         $round = (int)($match['round'] ?? 0);
         $roundPos = (int)($match['round_pos'] ?? 0);
@@ -694,6 +878,39 @@ final class AdminTournamentController
         }
 
         Flash::set('success', 'Match confirme.');
+        Response::redirect('/admin/tournaments/' . $tournamentId);
+    }
+
+    /** @param array<string, string> $params */
+    public function rejectReport(array $params = []): void
+    {
+        Auth::requireAdmin();
+
+        if (!Csrf::validate($_POST['csrf_token'] ?? null)) {
+            Response::badRequest('Invalid CSRF token');
+        }
+        Csrf::rotate();
+
+        $tournamentId = (int)($params['id'] ?? 0);
+        $matchId = (int)($params['matchId'] ?? 0);
+        if ($tournamentId <= 0 || $matchId <= 0) {
+            Response::notFound();
+        }
+
+        $mRepo = new MatchRepository();
+        $match = $mRepo->findById($matchId);
+        if ($match === null || (int)($match['tournament_id'] ?? 0) !== $tournamentId) {
+            Response::notFound();
+        }
+
+        if (($match['status'] ?? 'pending') !== 'reported') {
+            Flash::set('error', 'Ce match n\'est pas en etat reported.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        $mRepo->clearReport($matchId);
+
+        Flash::set('success', 'Report rejete.');
         Response::redirect('/admin/tournaments/' . $tournamentId);
     }
 
@@ -777,18 +994,47 @@ final class AdminTournamentController
             return;
         }
 
-        $grand = $mRepo->findByTournamentKey($tournamentId, 'grand', 1, 1);
-        $grandId = is_array($grand) ? (int)($grand['id'] ?? 0) : 0;
+        $grand1 = $mRepo->findByTournamentKey($tournamentId, 'grand', 1, 1);
+        $grand1Id = is_array($grand1) ? (int)($grand1['id'] ?? 0) : 0;
+        $grand2 = $mRepo->findByTournamentKey($tournamentId, 'grand', 2, 1);
+        $grand2Id = is_array($grand2) ? (int)($grand2['id'] ?? 0) : 0;
 
         if ($bracket === 'grand') {
+            // GF2 is only played if the losers bracket champion wins GF1.
+            if ($round !== 1 || $grand2Id <= 0 || !is_array($grand2)) {
+                return;
+            }
+
+            $wf = $mRepo->findByTournamentKey($tournamentId, 'winners', $wRounds, 1);
+            $wChamp = is_array($wf) ? (int)($wf['winner_id'] ?? 0) : 0;
+            if ($wChamp <= 0) {
+                return;
+            }
+            if ($wChamp !== $winnerPlayerId && $wChamp !== $loserPlayerId) {
+                return;
+            }
+
+            $other = ($wChamp === $winnerPlayerId) ? $loserPlayerId : $winnerPlayerId;
+            if ($other <= 0) {
+                return;
+            }
+
+            if ($winnerPlayerId === $wChamp) {
+                // Winners champ won GF1: no reset match.
+                $mRepo->voidMatch($grand2Id);
+                return;
+            }
+
+            // Losers champ won GF1: activate GF2 with the same participants.
+            $mRepo->resetSoloForReplay($grand2Id, $wChamp, $other);
             return;
         }
 
         if ($bracket === 'winners') {
             // Winner -> next winners match (or grand final slot 1).
             if ($round >= $wRounds) {
-                if ($grandId > 0 && is_array($grand)) {
-                    $this->setSoloNextSlot($mRepo, $grand, $grandId, 1, $winnerPlayerId);
+                if ($grand1Id > 0 && is_array($grand1)) {
+                    $this->setSoloNextSlot($mRepo, $grand1, $grand1Id, 1, $winnerPlayerId);
                 }
             } else {
                 $next = $mRepo->findByTournamentKey($tournamentId, 'winners', $round + 1, (int)(($roundPos + 1) / 2));
@@ -822,8 +1068,8 @@ final class AdminTournamentController
         if ($bracket === 'losers') {
             // Winner -> next losers match (or grand final slot 2).
             if ($round >= $lRounds) {
-                if ($grandId > 0 && is_array($grand)) {
-                    $this->setSoloNextSlot($mRepo, $grand, $grandId, 2, $winnerPlayerId);
+                if ($grand1Id > 0 && is_array($grand1)) {
+                    $this->setSoloNextSlot($mRepo, $grand1, $grand1Id, 2, $winnerPlayerId);
                 }
                 return;
             }
@@ -872,17 +1118,43 @@ final class AdminTournamentController
             return;
         }
 
-        $grand = $mRepo->findByTournamentKey($tournamentId, 'grand', 1, 1);
-        $grandId = is_array($grand) ? (int)($grand['id'] ?? 0) : 0;
+        $grand1 = $mRepo->findByTournamentKey($tournamentId, 'grand', 1, 1);
+        $grand1Id = is_array($grand1) ? (int)($grand1['id'] ?? 0) : 0;
+        $grand2 = $mRepo->findByTournamentKey($tournamentId, 'grand', 2, 1);
+        $grand2Id = is_array($grand2) ? (int)($grand2['id'] ?? 0) : 0;
 
         if ($bracket === 'grand') {
+            if ($round !== 1 || $grand2Id <= 0 || !is_array($grand2)) {
+                return;
+            }
+
+            $wf = $mRepo->findByTournamentKey($tournamentId, 'winners', $wRounds, 1);
+            $wChamp = is_array($wf) ? (int)($wf['winner_team_id'] ?? 0) : 0;
+            if ($wChamp <= 0) {
+                return;
+            }
+            if ($wChamp !== $winnerTeamId && $wChamp !== $loserTeamId) {
+                return;
+            }
+
+            $other = ($wChamp === $winnerTeamId) ? $loserTeamId : $winnerTeamId;
+            if ($other <= 0) {
+                return;
+            }
+
+            if ($winnerTeamId === $wChamp) {
+                $mRepo->voidMatch($grand2Id);
+                return;
+            }
+
+            $mRepo->resetTeamForReplay($grand2Id, $wChamp, $other);
             return;
         }
 
         if ($bracket === 'winners') {
             if ($round >= $wRounds) {
-                if ($grandId > 0 && is_array($grand)) {
-                    $this->setTeamNextSlot($mRepo, $grand, $grandId, 1, $winnerTeamId);
+                if ($grand1Id > 0 && is_array($grand1)) {
+                    $this->setTeamNextSlot($mRepo, $grand1, $grand1Id, 1, $winnerTeamId);
                 }
             } else {
                 $next = $mRepo->findByTournamentKey($tournamentId, 'winners', $round + 1, (int)(($roundPos + 1) / 2));
@@ -914,8 +1186,8 @@ final class AdminTournamentController
 
         if ($bracket === 'losers') {
             if ($round >= $lRounds) {
-                if ($grandId > 0 && is_array($grand)) {
-                    $this->setTeamNextSlot($mRepo, $grand, $grandId, 2, $winnerTeamId);
+                if ($grand1Id > 0 && is_array($grand1)) {
+                    $this->setTeamNextSlot($mRepo, $grand1, $grand1Id, 2, $winnerTeamId);
                 }
                 return;
             }

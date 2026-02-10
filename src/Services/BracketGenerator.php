@@ -131,6 +131,74 @@ final class BracketGenerator
         }
     }
 
+    /**
+     * Generate a round robin schedule using the circle method.
+     *
+     * - Creates all matches upfront.
+     * - If there is an odd number of entrants, one "BYE" per round is skipped (no match row).
+     *
+     * @param 'solo'|'team' $participantType
+     */
+    public function generateRoundRobin(int $tournamentId, string $participantType, int $bestOf = 3): void
+    {
+        $entrants = $participantType === 'team'
+            ? $this->listTeamEntrantsBySeed($tournamentId)
+            : $this->listSoloEntrantsBySeed($tournamentId);
+
+        $n = count($entrants);
+        if ($n < 2) {
+            throw new \RuntimeException('Not enough entrants to generate schedule');
+        }
+
+        /** @var list<int|null> $arr */
+        $arr = $entrants;
+        if (($n % 2) === 1) {
+            $arr[] = null; // BYE placeholder
+        }
+
+        $size = count($arr);
+        if ($size < 2) {
+            throw new \RuntimeException('Invalid entrant count');
+        }
+
+        $rounds = $size - 1;
+        $half = (int)($size / 2);
+
+        for ($round = 1; $round <= $rounds; $round++) {
+            $pos = 1;
+
+            for ($i = 0; $i < $half; $i++) {
+                $a = $arr[$i] ?? null;
+                $b = $arr[$size - 1 - $i] ?? null;
+                if ($a === null || $b === null) {
+                    continue; // BYE
+                }
+
+                // Small home/away shuffle to avoid always placing the fixed player on the same side.
+                if (($round % 2) === 0 && $i === 0) {
+                    [$a, $b] = [$b, $a];
+                }
+
+                if ($participantType === 'team') {
+                    $this->mRepo->createTeam($tournamentId, 'round_robin', $round, $pos, $bestOf, $a, $b);
+                } else {
+                    $this->mRepo->createSolo($tournamentId, 'round_robin', $round, $pos, $bestOf, $a, $b);
+                }
+                $pos++;
+            }
+
+            // Rotate all but the first element (circle method).
+            $fixed = $arr[0] ?? null;
+            $rest = array_slice($arr, 1);
+            if ($rest === []) {
+                break;
+            }
+            $last = array_pop($rest);
+            array_unshift($rest, $last);
+            $arr = array_merge([$fixed], $rest);
+        }
+    }
+
     /** @return list<int> */
     private function listSoloEntrantsBySeed(int $tournamentId): array
     {
@@ -356,6 +424,13 @@ final class BracketGenerator
         $grandId = $participantType === 'team'
             ? $this->mRepo->createTeam($tournamentId, 'grand', 1, 1, $bestOf, null, null)
             : $this->mRepo->createSolo($tournamentId, 'grand', 1, 1, $bestOf, null, null);
+
+        // Optional bracket reset grand final (GF2). Participants are filled only if needed.
+        if ($participantType === 'team') {
+            $this->mRepo->createTeam($tournamentId, 'grand', 2, 1, $bestOf, null, null);
+        } else {
+            $this->mRepo->createSolo($tournamentId, 'grand', 2, 1, $bestOf, null, null);
+        }
 
         // Auto-advance byes in winners bracket only (no loser drop when opponent is null).
         for ($r = 1; $r <= $rounds; $r++) {

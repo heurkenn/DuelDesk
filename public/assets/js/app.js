@@ -47,7 +47,8 @@
     }
 
     const losersRounds = (format === 'double_elim') ? ((2 * winnersRounds) - 2) : 0;
-    const grandEl = map.get(key('grand', 1, 1)) || null;
+    const grand1El = map.get(key('grand', 1, 1)) || null;
+    const grand2El = map.get(key('grand', 2, 1)) || null;
 
     const matrixRect = matrixEl.getBoundingClientRect();
     const width = Math.max(1, Math.ceil(matrixEl.scrollWidth || matrixRect.width));
@@ -59,6 +60,42 @@
 
     // Clear existing paths.
     while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    // Arrowhead markers (unique per SVG to avoid id collisions).
+    const uid = svg.dataset.uid || (svg.dataset.uid = String(Math.floor(Math.random() * 1e9)));
+    const ns = 'http://www.w3.org/2000/svg';
+    const arrowWinId = `dd-arrow-win-${uid}`;
+    const arrowLosId = `dd-arrow-los-${uid}`;
+
+    const mkArrow = (id, color, opacity = null) => {
+      const marker = document.createElementNS(ns, 'marker');
+      marker.setAttribute('id', id);
+      marker.setAttribute('viewBox', '0 0 10 10');
+      marker.setAttribute('refX', '9');
+      marker.setAttribute('refY', '5');
+      marker.setAttribute('markerWidth', '6');
+      marker.setAttribute('markerHeight', '6');
+      marker.setAttribute('orient', 'auto');
+      marker.setAttribute('markerUnits', 'strokeWidth');
+
+      const path = document.createElementNS(ns, 'path');
+      path.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+      path.setAttribute('fill', color);
+      if (opacity !== null) path.setAttribute('fill-opacity', String(opacity));
+      marker.appendChild(path);
+      return marker;
+    };
+
+    const defs = document.createElementNS(ns, 'defs');
+    defs.appendChild(mkArrow(arrowWinId, '#60a5fa', 0.30));
+    defs.appendChild(mkArrow(arrowLosId, '#e5e7eb', 0.18));
+    svg.appendChild(defs);
+
+    const markerUrlFor = (klass) => {
+      if (klass === 'line--win') return `url(#${arrowWinId})`;
+      if (klass === 'line--los') return `url(#${arrowLosId})`;
+      return '';
+    };
 
     const EDGE_PAD = 2; // Avoid lines bleeding under semi-transparent match cards.
     const pt = (el, side) => {
@@ -84,6 +121,8 @@
       const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       p.setAttribute('d', d);
       p.setAttribute('class', `line ${klass}`);
+      const marker = markerUrlFor(klass);
+      if (marker) p.setAttribute('marker-end', marker);
       if (fromKey) p.dataset.from = fromKey;
       if (toKey) p.dataset.to = toKey;
       svg.appendChild(p);
@@ -105,7 +144,7 @@
         for (let p = 1; p <= matchesInRound; p++) {
           if (r < winnersRounds) {
             connect('winners', r, p, 'winners', r + 1, Math.ceil(p / 2), 'line--win');
-          } else if (format === 'double_elim' && grandEl) {
+          } else if (format === 'double_elim' && grand1El) {
             connect('winners', r, p, 'grand', 1, 1, 'line--win');
           }
 
@@ -134,11 +173,16 @@
             const nextRound = r + 1;
             const nextPos = (r % 2 === 1) ? p : Math.ceil(p / 2);
             connect('losers', r, p, 'losers', nextRound, nextPos, 'line--los');
-          } else if (grandEl) {
+          } else if (grand1El) {
             connect('losers', r, p, 'grand', 1, 1, 'line--los');
           }
         }
       }
+    }
+
+    // Grand final reset (GF2) connection, if present.
+    if (format === 'double_elim' && grand1El && grand2El) {
+      connect('grand', 1, 1, 'grand', 2, 1, 'line--win');
     }
   };
 
@@ -305,6 +349,65 @@
     });
   };
 
+  const setupCopyButtons = () => {
+    document.addEventListener('click', async (e) => {
+      const el = e.target instanceof Element ? e.target.closest('[data-copy]') : null;
+      if (!(el instanceof HTMLElement)) return;
+
+      const raw = el.getAttribute('data-copy') || '';
+      if (!raw) return;
+
+      let text = raw;
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        text = raw;
+      } else if (raw.startsWith('/')) {
+        text = new URL(raw, window.location.origin).href;
+      }
+
+      const original = el.textContent || '';
+
+      try {
+        if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+          throw new Error('Clipboard API unavailable');
+        }
+
+        await navigator.clipboard.writeText(text);
+
+        el.textContent = 'Copie';
+        el.classList.add('is-copied');
+
+        window.setTimeout(() => {
+          el.textContent = original;
+          el.classList.remove('is-copied');
+        }, 900);
+      } catch {
+        // Fallback: let the user copy manually.
+        window.prompt('Copier le lien:', text);
+      }
+    });
+  };
+
+  const setupDropLinesToggle = () => {
+    document.addEventListener('click', (e) => {
+      const btn = e.target instanceof Element ? e.target.closest('[data-toggle-drop-lines]') : null;
+      if (!(btn instanceof HTMLButtonElement)) return;
+
+      const panel = btn.closest('[data-tpanel="bracket"]') || document;
+      const view = panel.querySelector('.bracketview');
+      if (!(view instanceof HTMLElement)) return;
+
+      const isOn = view.dataset.showDropLines === '1';
+      if (isOn) {
+        delete view.dataset.showDropLines;
+      } else {
+        view.dataset.showDropLines = '1';
+      }
+
+      btn.setAttribute('aria-pressed', isOn ? 'false' : 'true');
+      btn.textContent = isOn ? 'Afficher drop lines' : 'Masquer drop lines';
+    });
+  };
+
   const setupMatchModal = () => {
     const dialog = document.getElementById('matchModal');
     if (!(dialog instanceof HTMLDialogElement)) return;
@@ -328,6 +431,7 @@
       if (bracket === 'winners') return 'Gagnants';
       if (bracket === 'losers') return 'Perdants';
       if (bracket === 'grand') return 'Finale';
+      if (bracket === 'round_robin') return 'Round robin';
       return bracket || '';
     };
 
@@ -351,6 +455,7 @@
       const bracket = card.dataset.bracket || '';
       const bestOf = card.dataset.bestOf || '';
       const status = card.dataset.status || '';
+      const scheduledAt = card.dataset.scheduledAt || '';
 
       if (titleEl) titleEl.textContent = tag;
 
@@ -369,10 +474,26 @@
 
       const s1 = card.dataset.score1 || '0';
       const s2 = card.dataset.score2 || '0';
+      const rs1 = card.dataset.reportedScore1 || '';
+      const rs2 = card.dataset.reportedScore2 || '';
       const isConfirmed = status === 'confirmed';
-      if (scoreEl) scoreEl.textContent = isConfirmed ? `${s1} - ${s2}` : 'TBD';
+      const isReported = status === 'reported';
+      if (scoreEl) {
+        scoreEl.textContent = isConfirmed ? `${s1} - ${s2}` : (isReported && rs1 !== '' && rs2 !== '' ? `${rs1} - ${rs2}` : 'TBD');
+      }
 
-      if (statusEl) statusEl.textContent = status ? `Statut: ${status}` : '';
+      if (statusEl) {
+        const parts = [];
+        if (scheduledAt) parts.push(`Prevu: ${scheduledAt.slice(0, 16)} UTC`);
+        if (isReported) {
+          const who = card.dataset.reportedBy || '';
+          const at = card.dataset.reportedAt || '';
+          if (who) parts.push(`Reporte par: ${who}`);
+          if (at) parts.push(`Reporte a: ${at.slice(0, 16)} UTC`);
+        }
+        if (status) parts.push(`Statut: ${status}`);
+        statusEl.textContent = parts.join(' · ');
+      }
 
       if (linkEl instanceof HTMLAnchorElement) {
         linkEl.href = (card instanceof HTMLAnchorElement) ? card.href : (card.getAttribute('href') || '#');
@@ -417,6 +538,8 @@
   };
 
   setupTournamentPanels();
+  setupCopyButtons();
   setupBrackets();
+  setupDropLinesToggle();
   setupMatchModal();
 })();

@@ -5,7 +5,7 @@ declare(strict_types=1);
 use DuelDesk\View;
 
 /** @var list<array<string, mixed>> $games */
-/** @var array{name:string,game_id:string,format:string,participant_type:string,team_size:string,status:string,starts_at:string} $old */
+/** @var array{name:string,game_id:string,format:string,participant_type:string,team_size:string,max_entrants:string,signup_closes_at:string,best_of_default:string,status:string,starts_at:string} $old */
 /** @var array<string,string> $errors */
 /** @var string $csrfToken */
 
@@ -77,6 +77,18 @@ function field_error(array $errors, string $key): ?string
             </label>
 
             <label class="field">
+                <span class="field__label">Best-of (defaut)</span>
+                <select class="select<?= field_error($errors, 'best_of_default') ? ' input--error' : '' ?>" name="best_of_default">
+                    <?php foreach (['1', '3', '5', '7', '9'] as $bo): ?>
+                        <option value="<?= View::e($bo) ?>" <?= ($old['best_of_default'] ?? '3') === $bo ? 'selected' : '' ?>>BO<?= View::e($bo) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php if (field_error($errors, 'best_of_default')): ?>
+                    <span class="field__error"><?= View::e((string)field_error($errors, 'best_of_default')) ?></span>
+                <?php endif; ?>
+            </label>
+
+            <label class="field">
                 <span class="field__label">Participants</span>
                 <select class="select<?= field_error($errors, 'participant_type') ? ' input--error' : '' ?>" name="participant_type">
                     <option value="solo" <?= ($old['participant_type'] ?? 'solo') === 'solo' ? 'selected' : '' ?>>Solo (1v1)</option>
@@ -97,6 +109,15 @@ function field_error(array $errors, string $key): ?string
             </label>
 
             <label class="field">
+                <span class="field__label">Max entrants (optionnel)</span>
+                <input class="input<?= field_error($errors, 'max_entrants') ? ' input--error' : '' ?>" type="number" name="max_entrants" min="2" max="1024" step="1" inputmode="numeric" value="<?= View::e((string)($old['max_entrants'] ?? '')) ?>" placeholder="Ex: 32">
+                <span class="muted">Limite le nombre d'inscriptions (joueurs ou equipes).</span>
+                <?php if (field_error($errors, 'max_entrants')): ?>
+                    <span class="field__error"><?= View::e((string)field_error($errors, 'max_entrants')) ?></span>
+                <?php endif; ?>
+            </label>
+
+            <label class="field">
                 <span class="field__label">Statut</span>
                 <select class="select<?= field_error($errors, 'status') ? ' input--error' : '' ?>" name="status">
                     <option value="draft" <?= $old['status'] === 'draft' ? 'selected' : '' ?>>Draft</option>
@@ -110,8 +131,18 @@ function field_error(array $errors, string $key): ?string
             </label>
 
             <label class="field field--full">
+                <span class="field__label">Fermeture inscriptions (optionnel)</span>
+                <input class="input<?= field_error($errors, 'signup_closes_at') ? ' input--error' : '' ?>" type="datetime-local" name="signup_closes_at" value="<?= View::e((string)($old['signup_closes_at'] ?? '')) ?>">
+                <span class="muted">Heure en UTC. Apres cette date, inscription/retrait sont bloques (sauf admin).</span>
+                <?php if (field_error($errors, 'signup_closes_at')): ?>
+                    <span class="field__error"><?= View::e((string)field_error($errors, 'signup_closes_at')) ?></span>
+                <?php endif; ?>
+            </label>
+
+            <label class="field field--full">
                 <span class="field__label">Date de debut (optionnel)</span>
                 <input class="input<?= field_error($errors, 'starts_at') ? ' input--error' : '' ?>" type="datetime-local" name="starts_at" value="<?= View::e($old['starts_at']) ?>">
+                <span class="muted">Heure en UTC.</span>
                 <?php if (field_error($errors, 'starts_at')): ?>
                     <span class="field__error"><?= View::e((string)field_error($errors, 'starts_at')) ?></span>
                 <?php endif; ?>

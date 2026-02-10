@@ -11,6 +11,8 @@ if ($path !== '/') {
     $path = rtrim($path, '/');
 }
 
+$isPublicTournamentRoute = str_starts_with($path, '/t/');
+
 function nav_is_active(string $currentPath, string $prefix): bool
 {
     if ($prefix === '/') {
@@ -56,14 +58,15 @@ $csrfToken = Csrf::token();
 
             <nav class="nav" aria-label="Navigation">
                 <a class="nav__link" href="/" <?= nav_is_active($path, '/') ? 'aria-current="page"' : '' ?>>Dashboard</a>
-                <a class="nav__link" href="/tournaments" <?= nav_is_active($path, '/tournaments') ? 'aria-current="page"' : '' ?>>Tournois</a>
-                <?php if ($isAdmin): ?>
+                <?php $isTournaments = nav_is_active($path, '/tournaments') || nav_is_active($path, '/t'); ?>
+                <a class="nav__link" href="/tournaments" <?= $isTournaments ? 'aria-current="page"' : '' ?>>Tournois</a>
+                <?php if ($isAdmin && !$isPublicTournamentRoute): ?>
                     <a class="nav__link" href="/admin" <?= nav_is_active($path, '/admin') ? 'aria-current="page"' : '' ?>>Admin</a>
                 <?php endif; ?>
             </nav>
 
             <div class="topbar__cta">
-                <?php if ($isAdmin): ?>
+                <?php if ($isAdmin && !$isPublicTournamentRoute): ?>
                     <a class="btn btn--primary" href="/tournaments/new">Nouveau tournoi</a>
                 <?php endif; ?>
 

@@ -61,6 +61,15 @@ final class TeamRepository
         $stmt->execute(['id' => $teamId]);
     }
 
+    public function updateName(int $teamId, string $name): void
+    {
+        $stmt = $this->pdo->prepare('UPDATE teams SET name = :name WHERE id = :id');
+        $stmt->execute([
+            'name' => $name,
+            'id' => $teamId,
+        ]);
+    }
+
     public function uniqueSlug(int $tournamentId, string $name): string
     {
         $base = Str::slug($name);
@@ -129,4 +138,3 @@ final class TeamRepository
         return $out;
     }
 }
-

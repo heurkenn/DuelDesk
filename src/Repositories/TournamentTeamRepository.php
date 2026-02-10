@@ -32,6 +32,13 @@ final class TournamentTeamRepository
         return $stmt->fetchAll();
     }
 
+    public function countForTournament(int $tournamentId): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM tournament_teams WHERE tournament_id = :tid');
+        $stmt->execute(['tid' => $tournamentId]);
+        return (int)$stmt->fetchColumn();
+    }
+
     public function isTeamInTournament(int $tournamentId, int $teamId): bool
     {
         $stmt = $this->pdo->prepare(
@@ -97,4 +104,3 @@ final class TournamentTeamRepository
         ]);
     }
 }
-

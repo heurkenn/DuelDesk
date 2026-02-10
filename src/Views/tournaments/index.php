@@ -53,7 +53,7 @@ use DuelDesk\Support\Auth;
                         <td><span class="pill"><?= View::e((string)$t['format']) ?></span></td>
                         <td><span class="pill pill--soft"><?= View::e((string)$t['status']) ?></span></td>
                         <td><?= $t['starts_at'] ? View::e((string)$t['starts_at']) : '<span class="muted">-</span>' ?></td>
-                        <td class="table__right"><a class="link" href="/tournaments/<?= (int)$t['id'] ?>">Ouvrir</a></td>
+                        <td class="table__right"><a class="link" href="/t/<?= View::e((string)($t['slug'] ?? '')) ?>">Ouvrir</a></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

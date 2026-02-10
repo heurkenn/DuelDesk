@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DuelDesk\Controllers;
 
 use DuelDesk\Http\Response;
+use DuelDesk\Repositories\MatchRepository;
 use DuelDesk\Repositories\TeamMemberRepository;
 use DuelDesk\Repositories\TeamRepository;
 use DuelDesk\Repositories\TournamentRepository;
@@ -45,6 +46,33 @@ final class TournamentTeamController
         if (!$isOpen && !Auth::isAdmin()) {
             Flash::set('error', 'Inscriptions fermees.');
             Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $mRepo = new MatchRepository();
+        if (!Auth::isAdmin() && $mRepo->countForTournament($tournamentId) > 0) {
+            Flash::set('error', 'Inscriptions verrouillees (bracket deja genere).');
+            Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $signupClosesAt = $t['signup_closes_at'] ?? null;
+        if (!Auth::isAdmin() && is_string($signupClosesAt) && $signupClosesAt !== '') {
+            $ts = strtotime($signupClosesAt);
+            if ($ts !== false && $ts <= time()) {
+                Flash::set('error', 'Inscriptions fermees (date limite depassee).');
+                Response::redirect('/tournaments/' . $tournamentId);
+            }
+        }
+
+        $maxEntrants = $t['max_entrants'] ?? null;
+        if (!Auth::isAdmin() && $maxEntrants !== null) {
+            $max = (int)$maxEntrants;
+            if ($max > 0) {
+                $ttRepo = new TournamentTeamRepository();
+                if ($ttRepo->countForTournament($tournamentId) >= $max) {
+                    Flash::set('error', 'Tournoi complet.');
+                    Response::redirect('/tournaments/' . $tournamentId);
+                }
+            }
         }
 
         $teamName = trim((string)($_POST['team_name'] ?? ''));
@@ -109,6 +137,21 @@ final class TournamentTeamController
         if (!$isOpen && !Auth::isAdmin()) {
             Flash::set('error', 'Inscriptions fermees.');
             Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $mRepo = new MatchRepository();
+        if (!Auth::isAdmin() && $mRepo->countForTournament($tournamentId) > 0) {
+            Flash::set('error', 'Inscriptions verrouillees (bracket deja genere).');
+            Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $signupClosesAt = $t['signup_closes_at'] ?? null;
+        if (!Auth::isAdmin() && is_string($signupClosesAt) && $signupClosesAt !== '') {
+            $ts = strtotime($signupClosesAt);
+            if ($ts !== false && $ts <= time()) {
+                Flash::set('error', 'Inscriptions fermees (date limite depassee).');
+                Response::redirect('/tournaments/' . $tournamentId);
+            }
         }
 
         $code = strtoupper(trim((string)($_POST['join_code'] ?? '')));
@@ -186,6 +229,21 @@ final class TournamentTeamController
 
         if (($t['participant_type'] ?? 'solo') !== 'team') {
             Response::badRequest('Not a team tournament');
+        }
+
+        $mRepo = new MatchRepository();
+        if (!Auth::isAdmin() && $mRepo->countForTournament($tournamentId) > 0) {
+            Flash::set('error', "Retrait verrouille (bracket deja genere).");
+            Response::redirect('/tournaments/' . $tournamentId);
+        }
+
+        $signupClosesAt = $t['signup_closes_at'] ?? null;
+        if (!Auth::isAdmin() && is_string($signupClosesAt) && $signupClosesAt !== '') {
+            $ts = strtotime($signupClosesAt);
+            if ($ts !== false && $ts <= time()) {
+                Flash::set('error', 'Retrait bloque (inscriptions fermees).');
+                Response::redirect('/tournaments/' . $tournamentId);
+            }
         }
 
         $meId = Auth::id();

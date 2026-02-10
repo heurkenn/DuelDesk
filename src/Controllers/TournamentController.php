@@ -48,6 +48,9 @@ final class TournamentController
                 'format' => 'single_elim',
                 'participant_type' => 'solo',
                 'team_size' => '2',
+                'max_entrants' => '',
+                'signup_closes_at' => '',
+                'best_of_default' => '3',
                 'status' => 'draft',
                 'starts_at' => '',
             ],
@@ -71,6 +74,9 @@ final class TournamentController
         $format = (string)($_POST['format'] ?? 'single_elim');
         $participantType = (string)($_POST['participant_type'] ?? 'solo');
         $teamSizeRaw = trim((string)($_POST['team_size'] ?? ''));
+        $maxEntrantsRaw = trim((string)($_POST['max_entrants'] ?? ''));
+        $signupClosesAtRaw = (string)($_POST['signup_closes_at'] ?? '');
+        $bestOfRaw = trim((string)($_POST['best_of_default'] ?? '3'));
         $status = (string)($_POST['status'] ?? 'draft');
         $startsAtRaw = (string)($_POST['starts_at'] ?? '');
 
@@ -80,6 +86,9 @@ final class TournamentController
             'format' => $format,
             'participant_type' => $participantType,
             'team_size' => $teamSizeRaw,
+            'max_entrants' => $maxEntrantsRaw,
+            'signup_closes_at' => $signupClosesAtRaw,
+            'best_of_default' => $bestOfRaw,
             'status' => $status,
             'starts_at' => $startsAtRaw,
         ];
@@ -124,6 +133,20 @@ final class TournamentController
             }
         }
 
+        $maxEntrants = null;
+        if ($maxEntrantsRaw !== '') {
+            if (!ctype_digit($maxEntrantsRaw)) {
+                $errors['max_entrants'] = 'Max entrants invalide.';
+            } else {
+                $maxEntrants = (int)$maxEntrantsRaw;
+                if ($maxEntrants <= 0) {
+                    $maxEntrants = null;
+                } elseif ($maxEntrants < 2 || $maxEntrants > 1024) {
+                    $errors['max_entrants'] = 'Max entrants invalide (2 a 1024).';
+                }
+            }
+        }
+
         $statuses = ['draft', 'published', 'running', 'completed'];
         if (!in_array($status, $statuses, true)) {
             $errors['status'] = 'Statut invalide.';
@@ -132,6 +155,22 @@ final class TournamentController
         $startsAt = $this->normalizeStartsAt($startsAtRaw);
         if ($startsAtRaw !== '' && $startsAt === null) {
             $errors['starts_at'] = 'Date de debut invalide.';
+        }
+
+        $signupClosesAt = $this->normalizeStartsAt($signupClosesAtRaw);
+        if ($signupClosesAtRaw !== '' && $signupClosesAt === null) {
+            $errors['signup_closes_at'] = 'Date de fermeture invalide.';
+        }
+
+        $bestOfDefault = 3;
+        if ($bestOfRaw === '' || !ctype_digit($bestOfRaw)) {
+            $errors['best_of_default'] = 'Best-of invalide.';
+        } else {
+            $bestOfDefault = (int)$bestOfRaw;
+            $allowed = [1, 3, 5, 7, 9];
+            if (!in_array($bestOfDefault, $allowed, true)) {
+                $errors['best_of_default'] = 'Best-of invalide (1/3/5/7/9).';
+            }
         }
 
         if ($errors !== []) {
@@ -148,7 +187,7 @@ final class TournamentController
         $gameName = (string)$game['name'];
 
         $repo = new TournamentRepository();
-        $id = $repo->create(Auth::id(), $gameId, $gameName, $name, $format, $participantType, $teamSize, $status, $startsAt);
+        $id = $repo->create(Auth::id(), $gameId, $gameName, $name, $format, $participantType, $teamSize, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault);
 
         Flash::set('success', 'Tournoi cree.');
         Response::redirect('/tournaments/' . $id);
@@ -165,6 +204,121 @@ final class TournamentController
         $repo = new TournamentRepository();
         $tournament = $repo->findById($id);
         if ($tournament === null) {
+            Response::notFound();
+        }
+
+        $this->renderShow($tournament);
+    }
+
+    /** @param array<string, string> $params */
+    public function showBySlug(array $params = []): void
+    {
+        $slug = (string)($params['slug'] ?? '');
+        if ($slug === '') {
+            Response::notFound();
+        }
+
+        $repo = new TournamentRepository();
+        $tournament = $repo->findBySlug($slug);
+        if ($tournament === null) {
+            Response::notFound();
+        }
+
+        $this->renderShow($tournament, true);
+    }
+
+    /** @param array<string, string> $params */
+    public function match(array $params = []): void
+    {
+        $tournamentId = (int)($params['id'] ?? 0);
+        $matchId = (int)($params['matchId'] ?? 0);
+        if ($tournamentId <= 0 || $matchId <= 0) {
+            Response::notFound();
+        }
+
+        $tRepo = new TournamentRepository();
+        $tournament = $tRepo->findById($tournamentId);
+        if ($tournament === null) {
+            Response::notFound();
+        }
+
+        $participantType = (string)($tournament['participant_type'] ?? 'solo');
+
+        $mRepo = new MatchRepository();
+        $match = $participantType === 'team'
+            ? $mRepo->findTeamDetailed($matchId)
+            : $mRepo->findSoloDetailed($matchId);
+
+        if (!is_array($match) || (int)($match['tournament_id'] ?? 0) !== $tournamentId) {
+            Response::notFound();
+        }
+
+        $canReport = false;
+        if (Auth::check()) {
+            if (Auth::isAdmin()) {
+                $canReport = true;
+            } else {
+                $meId = Auth::id();
+                if ($meId !== null) {
+                    if ($participantType === 'team') {
+                        $t1 = $match['team1_id'] !== null ? (int)$match['team1_id'] : 0;
+                        $t2 = $match['team2_id'] !== null ? (int)$match['team2_id'] : 0;
+                        if ($t1 > 0 || $t2 > 0) {
+                            $tmRepo = new TeamMemberRepository();
+                            $canReport = ($t1 > 0 && $tmRepo->isCaptain($t1, $meId)) || ($t2 > 0 && $tmRepo->isCaptain($t2, $meId));
+                        }
+                    } else {
+                        $pRepo = new PlayerRepository();
+                        $p = $pRepo->findByUserId($meId);
+                        if ($p !== null) {
+                            $pid = (int)($p['id'] ?? 0);
+                            $a = $match['player1_id'] !== null ? (int)$match['player1_id'] : 0;
+                            $b = $match['player2_id'] !== null ? (int)$match['player2_id'] : 0;
+                            $canReport = $pid > 0 && ($pid === $a || $pid === $b);
+                        }
+                    }
+
+                    $st = (string)($match['status'] ?? 'pending');
+                    $reportedBy = $match['reported_by_user_id'] ?? null;
+                    $reportedById = (is_int($reportedBy) || is_string($reportedBy)) ? (int)$reportedBy : 0;
+                    if ($st === 'reported' && $reportedById > 0 && $reportedById !== $meId) {
+                        $canReport = false;
+                    }
+                }
+            }
+        }
+
+        View::render('tournaments/match', [
+            'title' => 'Match | ' . ((string)($tournament['name'] ?? 'Tournoi')) . ' | DuelDesk',
+            'tournament' => $tournament,
+            'match' => $match,
+            'participantType' => $participantType,
+            'csrfToken' => Csrf::token(),
+            'canReport' => $canReport,
+        ]);
+    }
+
+    private function normalizeStartsAt(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        // Expect HTML datetime-local: YYYY-MM-DDTHH:MM
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $value)) {
+            return null;
+        }
+
+        $value = str_replace('T', ' ', $value);
+        return $value . ':00';
+    }
+
+    /** @param array<string, mixed> $tournament */
+    private function renderShow(array $tournament, bool $isPublicView = false): void
+    {
+        $id = (int)($tournament['id'] ?? 0);
+        if ($id <= 0) {
             Response::notFound();
         }
 
@@ -231,58 +385,9 @@ final class TournamentController
             'mePlayerId' => $mePlayerId,
             'meTeam' => $meTeam,
             'matches' => $matches,
+            'isPublicView' => $isPublicView,
             'csrfToken' => Csrf::token(),
         ]);
-    }
-
-    /** @param array<string, string> $params */
-    public function match(array $params = []): void
-    {
-        $tournamentId = (int)($params['id'] ?? 0);
-        $matchId = (int)($params['matchId'] ?? 0);
-        if ($tournamentId <= 0 || $matchId <= 0) {
-            Response::notFound();
-        }
-
-        $tRepo = new TournamentRepository();
-        $tournament = $tRepo->findById($tournamentId);
-        if ($tournament === null) {
-            Response::notFound();
-        }
-
-        $participantType = (string)($tournament['participant_type'] ?? 'solo');
-
-        $mRepo = new MatchRepository();
-        $match = $participantType === 'team'
-            ? $mRepo->findTeamDetailed($matchId)
-            : $mRepo->findSoloDetailed($matchId);
-
-        if (!is_array($match) || (int)($match['tournament_id'] ?? 0) !== $tournamentId) {
-            Response::notFound();
-        }
-
-        View::render('tournaments/match', [
-            'title' => 'Match | ' . ((string)($tournament['name'] ?? 'Tournoi')) . ' | DuelDesk',
-            'tournament' => $tournament,
-            'match' => $match,
-            'participantType' => $participantType,
-        ]);
-    }
-
-    private function normalizeStartsAt(string $value): ?string
-    {
-        $value = trim($value);
-        if ($value === '') {
-            return null;
-        }
-
-        // Expect HTML datetime-local: YYYY-MM-DDTHH:MM
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $value)) {
-            return null;
-        }
-
-        $value = str_replace('T', ' ', $value);
-        return $value . ':00';
     }
 
     private function strlenSafe(string $value): int

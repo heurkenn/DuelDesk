@@ -13,16 +13,63 @@ use DuelDesk\Support\Auth;
 /** @var int|null $mePlayerId */
 /** @var array<string, mixed>|null $meTeam */
 /** @var list<array<string, mixed>> $matches */
+/** @var bool $isPublicView */
 /** @var string $csrfToken */
 
+$isPublicView = (bool)($isPublicView ?? false);
+
 $tid = (int)($tournament['id'] ?? 0);
+$slug = (string)($tournament['slug'] ?? '');
+$publicPath = $slug !== '' ? ('/t/' . $slug) : ('/tournaments/' . $tid);
 $participantType = (string)($tournament['participant_type'] ?? 'solo');
 $teamSize = (int)($tournament['team_size'] ?? 0);
 $format = (string)($tournament['format'] ?? 'single_elim');
 
 $status = (string)($tournament['status'] ?? 'draft');
-$isOpen = in_array($status, ['published', 'running'], true);
-$canSignup = $isOpen || Auth::isAdmin();
+$isOpenStatus = in_array($status, ['published', 'running'], true);
+$entrantCount = $participantType === 'team' ? count($teams) : count($players);
+
+$maxEntrantsRaw = $tournament['max_entrants'] ?? null;
+$maxEntrants = $maxEntrantsRaw !== null ? (int)$maxEntrantsRaw : 0;
+$isFull = $maxEntrants > 0 && $entrantCount >= $maxEntrants;
+
+$signupClosesAt = (string)($tournament['signup_closes_at'] ?? '');
+$signupClosesAtPretty = '';
+if ($signupClosesAt !== '') {
+    $v = substr($signupClosesAt, 0, 16);
+    $signupClosesAtPretty = ($v === false ? $signupClosesAt : $v) . ' UTC';
+}
+$signupClosed = false;
+if ($signupClosesAt !== '') {
+    $ts = strtotime($signupClosesAt);
+    if ($ts !== false && $ts <= time()) {
+        $signupClosed = true;
+    }
+}
+
+$bracketGenerated = $matches !== [];
+
+$isSignupOpen = $isOpenStatus && !$bracketGenerated && !$signupClosed && !$isFull;
+$signupState = $isSignupOpen ? 'ouvertes' : 'fermees';
+$signupHint = '';
+if (!$isOpenStatus) {
+    $signupHint = 'statut: ' . $status;
+} elseif ($bracketGenerated) {
+    $signupHint = 'bracket genere';
+} elseif ($signupClosed) {
+    $signupHint = 'date limite depassee';
+} elseif ($isFull) {
+    $signupHint = $maxEntrants > 0 ? "complet {$entrantCount}/{$maxEntrants}" : 'complet';
+} elseif ($signupClosesAt !== '') {
+    $signupHint = 'jusqu\'au ' . ($signupClosesAtPretty !== '' ? $signupClosesAtPretty : $signupClosesAt);
+}
+
+// Capabilities (admin bypasses locks).
+$canSignupSolo = Auth::isAdmin() || ($isOpenStatus && !$bracketGenerated && !$signupClosed && !$isFull);
+$canWithdrawSolo = Auth::isAdmin() || (!$bracketGenerated && !$signupClosed);
+$canCreateTeam = Auth::isAdmin() || ($isOpenStatus && !$bracketGenerated && !$signupClosed && !$isFull);
+$canJoinTeam = Auth::isAdmin() || ($isOpenStatus && !$bracketGenerated && !$signupClosed);
+$canLeaveTeam = Auth::isAdmin() || (!$bracketGenerated && !$signupClosed);
 
 /**
  * @param list<array{user_id:int,username:string,role:string}> $members
@@ -69,6 +116,12 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
     $bestOf = (int)($m['best_of'] ?? 0);
     $score1 = (int)($m['score1'] ?? 0);
     $score2 = (int)($m['score2'] ?? 0);
+    $scheduledAt = is_string($m['scheduled_at'] ?? null) ? (string)$m['scheduled_at'] : '';
+    $reportedScore1 = $m['reported_score1'] ?? null;
+    $reportedScore2 = $m['reported_score2'] ?? null;
+    $reportedWinnerSlot = $m['reported_winner_slot'] ?? null;
+    $reportedByUsername = (string)($m['reported_by_username'] ?? '');
+    $reportedAt = is_string($m['reported_at'] ?? null) ? (string)$m['reported_at'] : '';
 
     if ($participantType === 'team') {
         $aId = $m['team1_id'] !== null ? (int)$m['team1_id'] : null;
@@ -95,9 +148,12 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
     $bWin = $win !== null && $bId !== null && $win === $bId;
     $winnerSlot = $aWin ? 1 : ($bWin ? 2 : 0);
 
-    $showScores = ($st === 'confirmed') && ($aId !== null) && ($bId !== null);
-    $s1 = $showScores ? (string)$score1 : '-';
-    $s2 = $showScores ? (string)$score2 : '-';
+    $isReported = ($st === 'reported')
+        && ($aId !== null) && ($bId !== null)
+        && ($reportedScore1 !== null) && ($reportedScore2 !== null);
+    $showScores = (($st === 'confirmed') && ($aId !== null) && ($bId !== null)) || $isReported;
+    $s1 = $showScores ? ($isReported ? (string)(int)$reportedScore1 : (string)$score1) : '-';
+    $s2 = $showScores ? ($isReported ? (string)(int)$reportedScore2 : (string)$score2) : '-';
 
     $style = '';
     if ($col !== null && $rowStart !== null && $rowSpan !== null) {
@@ -108,7 +164,7 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
     ?>
     <a
         href="<?= View::e($href) ?>"
-        class="matchcard matchcard--clickable<?= $st === 'confirmed' ? ' is-confirmed' : '' ?>"
+        class="matchcard matchcard--clickable<?= $st === 'confirmed' ? ' is-confirmed' : '' ?><?= $isReported ? ' is-reported' : '' ?>"
         <?= $style !== '' ? ' style="' . View::e($style) . '"' : '' ?>
         data-match-id="<?= (int)$matchId ?>"
         data-key="<?= View::e($bracket . ':' . $round . ':' . $roundPos) ?>"
@@ -118,6 +174,12 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
         data-tag="<?= View::e($tag) ?>"
         data-status="<?= View::e($st) ?>"
         data-best-of="<?= (int)$bestOf ?>"
+        data-scheduled-at="<?= View::e($scheduledAt) ?>"
+        data-reported-score1="<?= $reportedScore1 !== null ? (int)$reportedScore1 : '' ?>"
+        data-reported-score2="<?= $reportedScore2 !== null ? (int)$reportedScore2 : '' ?>"
+        data-reported-winner-slot="<?= $reportedWinnerSlot !== null ? (int)$reportedWinnerSlot : '' ?>"
+        data-reported-by="<?= View::e($reportedByUsername) ?>"
+        data-reported-at="<?= View::e($reportedAt) ?>"
         data-a-name="<?= View::e($aLabel) ?>"
         data-b-name="<?= View::e($bLabel) ?>"
         data-score1="<?= (int)$score1 ?>"
@@ -146,11 +208,14 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
             <?php if (!empty($tournament['game_image_path'])): ?>
                 <img class="gameicon" src="<?= View::e((string)$tournament['game_image_path']) ?>" alt="" loading="lazy" width="24" height="24">
             <?php endif; ?>
-            <?= View::e((string)($tournament['game'] ?? '')) ?> · <span class="pill"><?= View::e((string)($tournament['format'] ?? '')) ?></span> <span class="pill pill--soft"><?= View::e((string)($tournament['status'] ?? '')) ?></span>
+            <?php $bracketPill = $bracketGenerated ? 'bracket: genere' : 'bracket: en attente'; ?>
+            <?= View::e((string)($tournament['game'] ?? '')) ?> · <span class="pill"><?= View::e((string)($tournament['format'] ?? '')) ?></span> <span class="pill pill--soft"><?= View::e((string)($tournament['status'] ?? '')) ?></span> <span class="pill pill--soft"><?= View::e($bracketPill) ?></span>
         </p>
     </div>
     <div class="pagehead__actions">
-        <?php if (Auth::isAdmin()): ?>
+        <a class="btn btn--ghost" href="<?= View::e($publicPath) ?>" title="Lien public partageable">Lien public</a>
+        <button class="btn btn--ghost" type="button" data-copy="<?= View::e($publicPath) ?>" title="Copier le lien du tournoi">Copier lien</button>
+        <?php if (Auth::isAdmin() && !$isPublicView): ?>
             <a class="btn btn--ghost" href="/admin/tournaments/<?= (int)$tournament['id'] ?>">Gerer</a>
         <?php endif; ?>
         <a class="btn btn--ghost" href="/tournaments">Retour</a>
@@ -182,34 +247,56 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                     <?= count($players) ?> participant(s)
                 <?php endif; ?>
                 <span class="meta__dot" aria-hidden="true"></span>
-                <span class="muted"><?= $isOpen ? 'ouvertes' : 'fermees' ?></span>
+                <span class="muted">inscriptions <?= View::e($signupState) ?></span>
+                <?php if ($signupHint !== ''): ?>
+                    <span class="meta__dot" aria-hidden="true"></span>
+                    <span class="muted"><?= View::e($signupHint) ?></span>
+                <?php endif; ?>
             </p>
         </div>
 
         <div class="inline">
             <?php if (!Auth::check()): ?>
-                <a class="btn btn--primary" href="/login?redirect=<?= View::e(urlencode('/tournaments/' . $tid)) ?>">Se connecter</a>
+                <a class="btn btn--primary" href="/login?redirect=<?= View::e(urlencode($publicPath)) ?>">Se connecter</a>
             <?php else: ?>
                 <?php if ($participantType === 'team'): ?>
                     <?php if ($isSignedUp && is_array($meTeam)): ?>
-                        <form method="post" action="/tournaments/<?= $tid ?>/teams/<?= (int)$meTeam['id'] ?>/leave" class="inline" data-confirm="Quitter ton equipe ?">
-                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
-                            <button class="btn btn--ghost" type="submit">Quitter</button>
-                        </form>
+                        <?php if ($canLeaveTeam): ?>
+                            <form method="post" action="/tournaments/<?= $tid ?>/teams/<?= (int)$meTeam['id'] ?>/leave" class="inline" data-confirm="Quitter ton equipe ?">
+                                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                                <button class="btn btn--ghost" type="submit">Quitter</button>
+                            </form>
+                        <?php else: ?>
+                            <span class="muted">Retrait bloque</span>
+                        <?php endif; ?>
                     <?php endif; ?>
                 <?php else: ?>
                     <?php if ($isSignedUp): ?>
-                        <form method="post" action="/tournaments/<?= $tid ?>/withdraw" class="inline">
-                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
-                            <button class="btn btn--ghost" type="submit">Se desinscrire</button>
-                        </form>
-                    <?php elseif ($canSignup): ?>
+                        <?php if ($canWithdrawSolo): ?>
+                            <form method="post" action="/tournaments/<?= $tid ?>/withdraw" class="inline">
+                                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                                <button class="btn btn--ghost" type="submit">Se desinscrire</button>
+                            </form>
+                        <?php else: ?>
+                            <span class="muted">Retrait bloque</span>
+                        <?php endif; ?>
+                    <?php elseif ($canSignupSolo): ?>
                         <form method="post" action="/tournaments/<?= $tid ?>/signup" class="inline">
                             <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
                             <button class="btn btn--primary" type="submit">S'inscrire</button>
                         </form>
                     <?php else: ?>
-                        <span class="muted">Inscriptions fermees</span>
+                        <?php
+                            $msg = 'Inscriptions fermees';
+                            if ($isFull) {
+                                $msg = 'Tournoi complet';
+                            } elseif ($bracketGenerated) {
+                                $msg = 'Inscriptions verrouillees';
+                            } elseif ($signupClosed) {
+                                $msg = 'Inscriptions fermees';
+                            }
+                        ?>
+                        <span class="muted"><?= View::e($msg) ?></span>
                     <?php endif; ?>
                 <?php endif; ?>
             <?php endif; ?>
@@ -218,45 +305,50 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
 
     <div class="card__body">
         <?php if ($participantType === 'team'): ?>
-            <?php if (Auth::check() && $canSignup && !$isSignedUp): ?>
-                <div class="split">
-                    <form class="card card--nested form" method="post" action="/tournaments/<?= $tid ?>/teams/create" novalidate>
-                        <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
-                        <div class="card__header">
-                            <h3 class="card__title">Creer une equipe</h3>
-                            <p class="card__subtitle">Tu deviens capitaine.</p>
-                        </div>
-                        <div class="card__body">
-                            <label class="field">
-                                <span class="field__label">Nom</span>
-                                <input class="input" name="team_name" placeholder="Ex: Night Owls" required maxlength="80">
-                            </label>
-                        </div>
-                        <div class="card__footer">
-                            <button class="btn btn--primary" type="submit">Creer</button>
-                        </div>
-                    </form>
+            <?php if (Auth::check() && !$isSignedUp && ($canCreateTeam || $canJoinTeam)): ?>
+                <?php $wrapClass = ($canCreateTeam && $canJoinTeam) ? 'split' : ''; ?>
+                <div class="<?= View::e($wrapClass) ?>">
+                    <?php if ($canCreateTeam): ?>
+                        <form class="card card--nested form" method="post" action="/tournaments/<?= $tid ?>/teams/create" novalidate>
+                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                            <div class="card__header">
+                                <h3 class="card__title">Creer une equipe</h3>
+                                <p class="card__subtitle">Tu deviens capitaine.</p>
+                            </div>
+                            <div class="card__body">
+                                <label class="field">
+                                    <span class="field__label">Nom</span>
+                                    <input class="input" name="team_name" placeholder="Ex: Night Owls" required maxlength="80">
+                                </label>
+                            </div>
+                            <div class="card__footer">
+                                <button class="btn btn--primary" type="submit">Creer</button>
+                            </div>
+                        </form>
+                    <?php endif; ?>
 
-                    <form class="card card--nested form" method="post" action="/tournaments/<?= $tid ?>/teams/join" novalidate>
-                        <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
-                        <div class="card__header">
-                            <h3 class="card__title">Rejoindre</h3>
-                            <p class="card__subtitle">Avec un code.</p>
-                        </div>
-                        <div class="card__body">
-                            <label class="field">
-                                <span class="field__label">Code</span>
-                                <input class="input mono" name="join_code" placeholder="Ex: 8KQ7M2ZP4A" required maxlength="16">
-                            </label>
-                        </div>
-                        <div class="card__footer">
-                            <button class="btn btn--ghost" type="submit">Rejoindre</button>
-                        </div>
-                    </form>
+                    <?php if ($canJoinTeam): ?>
+                        <form class="card card--nested form" method="post" action="/tournaments/<?= $tid ?>/teams/join" novalidate>
+                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                            <div class="card__header">
+                                <h3 class="card__title">Rejoindre</h3>
+                                <p class="card__subtitle">Avec un code.</p>
+                            </div>
+                            <div class="card__body">
+                                <label class="field">
+                                    <span class="field__label">Code</span>
+                                    <input class="input mono" name="join_code" placeholder="Ex: 8KQ7M2ZP4A" required maxlength="16">
+                                </label>
+                            </div>
+                            <div class="card__footer">
+                                <button class="btn btn--ghost" type="submit">Rejoindre</button>
+                            </div>
+                        </form>
+                    <?php endif; ?>
                 </div>
             <?php elseif (Auth::check() && $isSignedUp && is_array($meTeam)): ?>
                 <div class="empty empty--compact">
-                    <div class="empty__title">Ton equipe: <?= View::e((string)$meTeam['name']) ?></div>
+                    <div class="empty__title">Ton equipe: <a class="link" href="/teams/<?= (int)($meTeam['id'] ?? 0) ?>"><?= View::e((string)$meTeam['name']) ?></a></div>
                     <div class="empty__hint">
                         Code: <span class="mono"><?= View::e((string)$meTeam['join_code']) ?></span>
                     </div>
@@ -266,7 +358,13 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
             <?php if ($teams === []): ?>
                 <div class="empty empty--compact">
                     <div class="empty__title">Aucune equipe</div>
-                    <div class="empty__hint">Cree une equipe ou rejoins-en une avec un code.</div>
+                    <div class="empty__hint">
+                        <?php if ($isSignupOpen): ?>
+                            Cree une equipe ou rejoins-en une avec un code.
+                        <?php else: ?>
+                            Inscriptions <?= View::e($signupState) ?><?= $signupHint !== '' ? ' · ' . View::e($signupHint) : '' ?>.
+                        <?php endif; ?>
+                    </div>
                 </div>
             <?php else: ?>
                 <div class="tablewrap" style="margin-top: 14px;">
@@ -289,7 +387,7 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                                 ?>
                                 <tr class="<?= $isMine ? 'row--me' : '' ?>">
                                     <td class="table__strong">
-                                        <?= View::e((string)($t['name'] ?? '')) ?>
+                                        <a class="link" href="/teams/<?= (int)$teamId ?>"><?= View::e((string)($t['name'] ?? '')) ?></a>
                                         <?php if ($isMine): ?><span class="pill pill--soft">toi</span><?php endif; ?>
                                     </td>
                                     <td><?= View::e(format_members($members)) ?></td>
@@ -306,7 +404,13 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
             <?php if ($players === []): ?>
                 <div class="empty empty--compact">
                     <div class="empty__title">Aucun inscrit</div>
-                    <div class="empty__hint">Les joueurs peuvent s'inscrire depuis cette page.</div>
+                    <div class="empty__hint">
+                        <?php if ($isSignupOpen): ?>
+                            Les joueurs peuvent s'inscrire depuis cette page.
+                        <?php else: ?>
+                            Inscriptions <?= View::e($signupState) ?><?= $signupHint !== '' ? ' · ' . View::e($signupHint) : '' ?>.
+                        <?php endif; ?>
+                    </div>
                 </div>
             <?php else: ?>
                 <div class="tablewrap">
@@ -355,7 +459,10 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
             </p>
         </div>
         <div class="inline">
-            <?php if (Auth::isAdmin()): ?>
+            <?php if ($format === 'double_elim' && $matches !== []): ?>
+                <button class="btn btn--ghost btn--compact" type="button" data-toggle-drop-lines aria-pressed="false">Afficher drop lines</button>
+            <?php endif; ?>
+            <?php if (Auth::isAdmin() && !$isPublicView): ?>
                 <a class="btn btn--ghost" href="/admin/tournaments/<?= $tid ?>">Admin bracket</a>
             <?php endif; ?>
         </div>
@@ -363,10 +470,189 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
 
     <div class="card__body">
         <?php if ($format === 'round_robin'): ?>
-            <div class="empty empty--compact">
-                <div class="empty__title">Round robin pas encore implemente</div>
-                <div class="empty__hint">Pour le moment, utilise <span class="mono">single_elim</span> ou <span class="mono">double_elim</span>.</div>
-            </div>
+            <?php
+                $rr = [];
+                foreach ($matches as $m) {
+                    if (($m['bracket'] ?? '') !== 'round_robin') {
+                        continue;
+                    }
+                    $r = (int)($m['round'] ?? 0);
+                    $p = (int)($m['round_pos'] ?? 0);
+                    if ($r <= 0 || $p <= 0) {
+                        continue;
+                    }
+                    $rr[$r][$p] = $m;
+                }
+                ksort($rr);
+                foreach ($rr as $r => $list) {
+                    ksort($rr[$r]);
+                }
+
+                // Participants map: id -> display name.
+                $pmap = [];
+                if ($participantType === 'team') {
+                    foreach ($teams as $t) {
+                        $id = (int)($t['team_id'] ?? 0);
+                        if ($id <= 0) {
+                            continue;
+                        }
+                        $name = (string)($t['name'] ?? ('#' . $id));
+                        $pmap[$id] = $name;
+                    }
+                } else {
+                    foreach ($players as $p) {
+                        $id = (int)($p['player_id'] ?? 0);
+                        if ($id <= 0) {
+                            continue;
+                        }
+                        $name = (string)($p['handle'] ?? ('#' . $id));
+                        $pmap[$id] = $name;
+                    }
+                }
+
+                /** @var array<int, array{id:int,name:string,played:int,wins:int,losses:int,pf:int,pa:int}> $stats */
+                $stats = [];
+                foreach ($pmap as $id => $name) {
+                    $stats[$id] = [
+                        'id' => (int)$id,
+                        'name' => (string)$name,
+                        'played' => 0,
+                        'wins' => 0,
+                        'losses' => 0,
+                        'pf' => 0,
+                        'pa' => 0,
+                    ];
+                }
+
+                foreach ($rr as $r => $list) {
+                    foreach ($list as $p => $m) {
+                        if (($m['status'] ?? 'pending') !== 'confirmed') {
+                            continue;
+                        }
+
+                        if ($participantType === 'team') {
+                            $a = $m['team1_id'] !== null ? (int)$m['team1_id'] : null;
+                            $b = $m['team2_id'] !== null ? (int)$m['team2_id'] : null;
+                            $win = $m['winner_team_id'] !== null ? (int)$m['winner_team_id'] : null;
+                        } else {
+                            $a = $m['player1_id'] !== null ? (int)$m['player1_id'] : null;
+                            $b = $m['player2_id'] !== null ? (int)$m['player2_id'] : null;
+                            $win = $m['winner_id'] !== null ? (int)$m['winner_id'] : null;
+                        }
+
+                        if ($a === null || $b === null || $win === null) {
+                            continue;
+                        }
+
+                        $s1 = (int)($m['score1'] ?? 0);
+                        $s2 = (int)($m['score2'] ?? 0);
+
+                        if (!isset($stats[$a])) {
+                            $stats[$a] = ['id' => $a, 'name' => (string)($pmap[$a] ?? ('#' . $a)), 'played' => 0, 'wins' => 0, 'losses' => 0, 'pf' => 0, 'pa' => 0];
+                        }
+                        if (!isset($stats[$b])) {
+                            $stats[$b] = ['id' => $b, 'name' => (string)($pmap[$b] ?? ('#' . $b)), 'played' => 0, 'wins' => 0, 'losses' => 0, 'pf' => 0, 'pa' => 0];
+                        }
+
+                        $stats[$a]['played']++;
+                        $stats[$b]['played']++;
+                        $stats[$a]['pf'] += $s1;
+                        $stats[$a]['pa'] += $s2;
+                        $stats[$b]['pf'] += $s2;
+                        $stats[$b]['pa'] += $s1;
+
+                        if ($win === $a) {
+                            $stats[$a]['wins']++;
+                            $stats[$b]['losses']++;
+                        } elseif ($win === $b) {
+                            $stats[$b]['wins']++;
+                            $stats[$a]['losses']++;
+                        }
+                    }
+                }
+
+                $standings = array_values($stats);
+                usort($standings, static function (array $x, array $y): int {
+                    if (($x['wins'] ?? 0) !== ($y['wins'] ?? 0)) {
+                        return (int)($y['wins'] ?? 0) <=> (int)($x['wins'] ?? 0);
+                    }
+                    if (($x['losses'] ?? 0) !== ($y['losses'] ?? 0)) {
+                        return (int)($x['losses'] ?? 0) <=> (int)($y['losses'] ?? 0);
+                    }
+                    $dx = (int)($x['pf'] ?? 0) - (int)($x['pa'] ?? 0);
+                    $dy = (int)($y['pf'] ?? 0) - (int)($y['pa'] ?? 0);
+                    if ($dx !== $dy) {
+                        return $dy <=> $dx;
+                    }
+                    return strcasecmp((string)($x['name'] ?? ''), (string)($y['name'] ?? ''));
+                });
+            ?>
+
+            <?php if ($rr === []): ?>
+                <div class="empty empty--compact">
+                    <div class="empty__title">Calendrier non genere</div>
+                    <div class="empty__hint">Un admin doit generer le round robin depuis la page de gestion.</div>
+                </div>
+            <?php else: ?>
+                <div class="bracketview rrview" data-participant-type="<?= View::e($participantType) ?>">
+                    <div class="bracketview__scroll">
+                        <div class="rrmatrix">
+                            <section class="card card--nested rrstandings">
+                                <div class="card__header">
+                                    <div>
+                                        <h3 class="card__title">Classement</h3>
+                                        <p class="card__subtitle">Trie: W desc, L asc, diff desc.</p>
+                                    </div>
+                                </div>
+                                <div class="card__body">
+                                    <div class="tablewrap">
+                                        <table class="table table--compact">
+                                            <thead>
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th><?= $participantType === 'team' ? 'Equipe' : 'Joueur' ?></th>
+                                                    <th class="table__right">P</th>
+                                                    <th class="table__right">W</th>
+                                                    <th class="table__right">L</th>
+                                                    <th class="table__right">Diff</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php $rank = 1; ?>
+                                                <?php foreach ($standings as $row): ?>
+                                                    <?php $diff = (int)($row['pf'] ?? 0) - (int)($row['pa'] ?? 0); ?>
+                                                    <tr>
+                                                        <td class="mono"><?= (int)$rank ?></td>
+                                                        <td class="table__strong"><?= View::e((string)($row['name'] ?? '')) ?></td>
+                                                        <td class="mono table__right"><?= (int)($row['played'] ?? 0) ?></td>
+                                                        <td class="mono table__right"><?= (int)($row['wins'] ?? 0) ?></td>
+                                                        <td class="mono table__right"><?= (int)($row['losses'] ?? 0) ?></td>
+                                                        <td class="mono table__right"><?= $diff >= 0 ? '+' . $diff : (string)$diff ?></td>
+                                                    </tr>
+                                                    <?php $rank++; ?>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <div class="rrrounds">
+                                <?php foreach ($rr as $r => $list): ?>
+                                    <div class="rrround">
+                                        <div class="rrround__head">Round <?= (int)$r ?></div>
+                                        <div class="rrround__list">
+                                            <?php foreach ($list as $p => $m): ?>
+                                                <?php render_matchcard($m, $participantType, "RR{$r}#{$p}"); ?>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
         <?php elseif ($matches === []): ?>
             <div class="empty empty--compact">
                 <div class="empty__title">Bracket non genere</div>
@@ -376,7 +662,8 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
             <?php
                 $winners = [];
                 $losers = [];
-                $grand = null;
+                $grand1 = null;
+                $grand2 = null;
                 $wRounds = 0;
 
                 foreach ($matches as $m) {
@@ -384,7 +671,11 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                     $r = (int)($m['round'] ?? 0);
                     $p = (int)($m['round_pos'] ?? 0);
                     if ($b === 'grand') {
-                        $grand = $m;
+                        if ($r === 1) {
+                            $grand1 = $m;
+                        } elseif ($r === 2) {
+                            $grand2 = $m;
+                        }
                         continue;
                     }
                     if ($r <= 0 || $p <= 0) {
@@ -464,12 +755,25 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                             </div>
 
                             <div class="bracketfinal">
-                                <div class="bracketsection__head">Finale</div>
-                                <?php if (is_array($grand)): ?>
-                                    <?php render_matchcard($grand, $participantType, 'GF'); ?>
-                                <?php else: ?>
-                                    <div class="muted">TBD</div>
-                                <?php endif; ?>
+                                <?php $finalCols = is_array($grand2) ? 2 : 1; ?>
+                                <div class="bracketfinal__cols" style="--final-cols: <?= (int)$finalCols ?>;">
+                                    <div class="bracketfinal__col">
+                                        <div class="bracketsection__head">Finale</div>
+                                        <?php if (is_array($grand1)): ?>
+                                            <?php render_matchcard($grand1, $participantType, 'GF'); ?>
+                                        <?php else: ?>
+                                            <div class="muted">TBD</div>
+                                        <?php endif; ?>
+                                    </div>
+
+                                    <?php if (is_array($grand2)): ?>
+                                        <div class="bracketfinal__col">
+                                            <div class="bracketsection__head">Reset (si besoin)</div>
+                                            <?php render_matchcard($grand2, $participantType, 'GF2'); ?>
+                                            <div class="muted bracketfinal__note">Joue ce match uniquement si le gagnant du losers bat le gagnant du winners en GF.</div>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
                             </div>
                         </div>
                     <?php elseif ($wRounds > 0 && $bracketSize > 0): ?>
@@ -561,27 +865,55 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                         <dt>Jeu</dt>
                         <dd><?= View::e((string)$tournament['game']) ?></dd>
                     </div>
-                    <div class="dl__row">
-                        <dt>Format</dt>
-                        <dd><?= View::e((string)$tournament['format']) ?></dd>
-                    </div>
-                    <div class="dl__row">
-                        <dt>Participants</dt>
-                        <dd>
-                            <?php if ($participantType === 'team'): ?>
-                                equipe<?= $teamSize >= 2 ? ' (' . (int)$teamSize . ')' : '' ?>
-                            <?php else: ?>
-                                solo
-                            <?php endif; ?>
-                        </dd>
-                    </div>
-                    <div class="dl__row">
-                        <dt>Statut</dt>
-                        <dd><?= View::e((string)$tournament['status']) ?></dd>
-                    </div>
+                <div class="dl__row">
+                    <dt>Format</dt>
+                    <dd><?= View::e((string)$tournament['format']) ?></dd>
+                </div>
+                <div class="dl__row">
+                    <dt>Best-of</dt>
+                    <dd>BO<?= (int)($tournament['best_of_default'] ?? 3) ?></dd>
+                </div>
+                <div class="dl__row">
+                    <dt>Participants</dt>
+                    <dd>
+                        <?php if ($participantType === 'team'): ?>
+                            equipe<?= $teamSize >= 2 ? ' (' . (int)$teamSize . ')' : '' ?>
+                        <?php else: ?>
+                            solo
+                        <?php endif; ?>
+                    </dd>
+                </div>
+                <div class="dl__row">
+                    <dt>Max entrants</dt>
+                    <dd><?= $maxEntrants > 0 ? View::e("{$entrantCount}/{$maxEntrants}") : '<span class="muted">-</span>' ?></dd>
+                </div>
+                <div class="dl__row">
+                    <dt>Fermeture</dt>
+                    <dd><?= $signupClosesAt !== '' ? View::e($signupClosesAtPretty !== '' ? $signupClosesAtPretty : $signupClosesAt) : '<span class="muted">-</span>' ?></dd>
+                </div>
+                <div class="dl__row">
+                    <dt>Lien public</dt>
+                    <dd><a class="link mono" href="<?= View::e($publicPath) ?>"><?= View::e($publicPath) ?></a></dd>
+                </div>
+                <div class="dl__row">
+                    <dt>Timezone</dt>
+                    <dd><span class="mono">UTC</span></dd>
+                </div>
+                <div class="dl__row">
+                    <dt>Statut</dt>
+                    <dd><?= View::e((string)$tournament['status']) ?></dd>
+                </div>
                     <div class="dl__row">
                         <dt>Debut</dt>
-                        <dd><?= $tournament['starts_at'] ? View::e((string)$tournament['starts_at']) : '<span class="muted">-</span>' ?></dd>
+                        <?php
+                            $startsAt = is_string($tournament['starts_at'] ?? null) ? (string)$tournament['starts_at'] : '';
+                            $startsAtPretty = '';
+                            if ($startsAt !== '') {
+                                $v = substr($startsAt, 0, 16);
+                                $startsAtPretty = ($v === false ? $startsAt : $v) . ' UTC';
+                            }
+                        ?>
+                        <dd><?= $startsAt !== '' ? View::e($startsAtPretty !== '' ? $startsAtPretty : $startsAt) : '<span class="muted">-</span>' ?></dd>
                     </div>
                     <div class="dl__row">
                         <dt>Cree le</dt>
@@ -606,7 +938,7 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                 </ul>
             </div>
             <div class="card__footer">
-                <?php if (Auth::isAdmin()): ?>
+                <?php if (Auth::isAdmin() && !$isPublicView): ?>
                     <a class="btn btn--primary" href="/tournaments/new" title="Creer un autre tournoi">Nouveau tournoi</a>
                 <?php endif; ?>
             </div>

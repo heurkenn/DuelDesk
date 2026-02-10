@@ -289,6 +289,11 @@ h1, h2, h3 {
   font-size: 13px;
 }
 
+.btn.is-copied {
+  border-color: rgba(52, 211, 153, 0.26);
+  background: rgba(52, 211, 153, 0.10);
+}
+
 .link {
   color: var(--brand);
   font-weight: 700;
@@ -815,6 +820,12 @@ h1, h2, h3 {
   width: 70px;
 }
 
+.input--date {
+  width: 200px;
+  max-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
 .select { appearance: none; background-image:
   linear-gradient(45deg, transparent 50%, rgba(229,231,235,0.55) 50%),
   linear-gradient(135deg, rgba(229,231,235,0.55) 50%, transparent 50%);
@@ -1032,6 +1043,10 @@ h1, h2, h3 {
   stroke: rgba(251, 191, 36, 0.92);
   stroke-width: 2;
   stroke-dasharray: 6 8;
+  opacity: 0;
+}
+
+.bracketview[data-show-drop-lines="1"] .bracketlines .line--drop {
   opacity: 0.08;
 }
 
@@ -1047,6 +1062,14 @@ h1, h2, h3 {
 
 .matchcard.is-confirmed {
   border-color: rgba(96, 165, 250, 0.22);
+}
+
+.matchcard.is-reported {
+  border-color: rgba(251, 191, 36, 0.18);
+}
+
+.matchcard.is-reported .matchcard__score {
+  color: rgba(251, 191, 36, 0.80);
 }
 
 .matchcard__slot {
@@ -1113,15 +1136,78 @@ h1, h2, h3 {
 }
 
 .bracketfinal {
-  flex: 0 0 var(--bracket-col);
+  flex: 0 0 auto;
+  width: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.bracketfinal .matchcard {
+  margin-top: 10px;
+}
+
+.bracketfinal__cols {
+  --final-cols: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--bracket-gap);
+  width: calc(var(--final-cols) * var(--bracket-col) + (var(--final-cols) - 1) * var(--bracket-gap));
+}
+
+.bracketfinal__col {
   width: var(--bracket-col);
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
-.bracketfinal .matchcard {
+.bracketfinal__note {
   margin-top: 10px;
+  max-width: var(--bracket-col);
+}
+
+/* Round robin */
+
+.rrmatrix {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+  padding: 16px;
+  min-width: max-content;
+}
+
+.rrstandings {
+  flex: 0 0 360px;
+  width: 360px;
+}
+
+.rrrounds {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--bracket-gap);
+}
+
+.rrround {
+  width: var(--bracket-col);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rrround__head {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgba(229, 231, 235, 0.70);
+}
+
+.rrround__list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 /* Modal */
