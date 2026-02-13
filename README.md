@@ -9,6 +9,18 @@ docker compose up -d --build
 docker compose exec php php bin/migrate.php
 ```
 
+Ou en 1 commande:
+
+```bash
+bin/dev.sh up
+```
+
+Seed demo (optionnel):
+
+```bash
+bin/dev.sh up --seed
+```
+
 Puis ouvre:
 
 - `http://localhost:8080`

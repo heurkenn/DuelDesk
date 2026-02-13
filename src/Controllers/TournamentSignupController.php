@@ -11,6 +11,7 @@ use DuelDesk\Repositories\TournamentPlayerRepository;
 use DuelDesk\Repositories\TournamentRepository;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
+use DuelDesk\Support\Discord;
 use DuelDesk\Support\Flash;
 
 final class TournamentSignupController
@@ -89,6 +90,15 @@ final class TournamentSignupController
 
         $tpRepo = new TournamentPlayerRepository();
         $tpRepo->add($tournamentId, $playerId);
+
+        try {
+            $discordUserId = trim((string)($me['discord_user_id'] ?? ''));
+            if ($discordUserId !== '') {
+                Discord::tryAutoRoleOnSignup($discordUserId);
+            }
+        } catch (\Throwable) {
+            // Discord integration is best-effort.
+        }
 
         Flash::set('success', 'Inscription enregistree.');
         Response::redirect('/tournaments/' . $tournamentId);

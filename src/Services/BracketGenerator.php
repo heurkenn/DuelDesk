@@ -22,7 +22,7 @@ final class BracketGenerator
      *
      * @param 'solo'|'team' $participantType
      */
-    public function generateSingleElim(int $tournamentId, string $participantType, int $bestOf = 3): void
+    public function generateSingleElim(int $tournamentId, string $participantType, int $bestOf = 3, ?int $bestOfFinal = null): void
     {
         $entrants = $participantType === 'team'
             ? $this->listTeamEntrantsBySeed($tournamentId)
@@ -68,65 +68,65 @@ final class BracketGenerator
                     $b = $slots[(($pos - 1) * 2) + 1] ?? null;
                 }
 
+                $bo = ($r === $rounds && $bestOfFinal !== null) ? $bestOfFinal : $bestOf;
                 $matchId = $participantType === 'team'
-                    ? $this->mRepo->createTeam($tournamentId, 'winners', $r, $pos, $bestOf, $a, $b)
-                    : $this->mRepo->createSolo($tournamentId, 'winners', $r, $pos, $bestOf, $a, $b);
+                    ? $this->mRepo->createTeam($tournamentId, 'winners', $r, $pos, $bo, $a, $b)
+                    : $this->mRepo->createSolo($tournamentId, 'winners', $r, $pos, $bo, $a, $b);
 
                 $ids[$r][$pos] = $matchId;
                 $parts[$r][$pos] = [$a, $b];
             }
         }
 
-        // Auto-advance byes across rounds.
-        for ($r = 1; $r <= $rounds; $r++) {
-            $matchesInRound = (int)($bracketSize / (2 ** $r));
-            for ($pos = 1; $pos <= $matchesInRound; $pos++) {
-                [$a, $b] = $parts[$r][$pos] ?? [null, null];
-                $winner = null;
+        // Auto-advance byes from round 1 only.
+        // Important: in later rounds, NULL slots mean "TBD from previous match", not a BYE.
+        $r = 1;
+        $matchesInRound = (int)($bracketSize / (2 ** $r));
+        for ($pos = 1; $pos <= $matchesInRound; $pos++) {
+            [$a, $b] = $parts[$r][$pos] ?? [null, null];
+            $winner = null;
 
-                if ($a !== null && $b === null) {
-                    $winner = $a;
-                } elseif ($a === null && $b !== null) {
-                    $winner = $b;
-                }
+            if ($a !== null && $b === null) {
+                $winner = $a;
+            } elseif ($a === null && $b !== null) {
+                $winner = $b;
+            }
 
-                if ($winner === null) {
-                    continue;
-                }
+            if ($winner === null) {
+                continue;
+            }
 
-                $matchId = (int)($ids[$r][$pos] ?? 0);
-                if ($matchId <= 0) {
-                    continue;
-                }
+            $matchId = (int)($ids[$r][$pos] ?? 0);
+            if ($matchId <= 0) {
+                continue;
+            }
 
-                if ($participantType === 'team') {
-                    $this->mRepo->confirmTeamWinner($matchId, $winner);
-                } else {
-                    $this->mRepo->confirmSoloWinner($matchId, $winner);
-                }
+            if ($participantType === 'team') {
+                $this->mRepo->confirmTeamWinner($matchId, $winner);
+            } else {
+                $this->mRepo->confirmSoloWinner($matchId, $winner);
+            }
 
-                if ($r >= $rounds) {
-                    continue;
-                }
+            if ($rounds <= 1) {
+                continue;
+            }
 
-                $nextRound = $r + 1;
-                $nextPos = (int)(($pos + 1) / 2);
-                $nextSlot = ($pos % 2 === 1) ? 1 : 2;
-                $nextMatchId = (int)($ids[$nextRound][$nextPos] ?? 0);
+            $nextRound = 2;
+            $nextPos = (int)(($pos + 1) / 2);
+            $nextSlot = ($pos % 2 === 1) ? 1 : 2;
+            $nextMatchId = (int)($ids[$nextRound][$nextPos] ?? 0);
 
-                if ($nextMatchId <= 0) {
-                    continue;
-                }
+            if ($nextMatchId <= 0) {
+                continue;
+            }
 
-                // Update in-memory participants.
-                $parts[$nextRound][$nextPos] ??= [null, null];
-                $parts[$nextRound][$nextPos][$nextSlot - 1] = $winner;
+            $parts[$nextRound][$nextPos] ??= [null, null];
+            $parts[$nextRound][$nextPos][$nextSlot - 1] = $winner;
 
-                if ($participantType === 'team') {
-                    $this->mRepo->setTeamSlot($nextMatchId, $nextSlot, $winner);
-                } else {
-                    $this->mRepo->setSoloSlot($nextMatchId, $nextSlot, $winner);
-                }
+            if ($participantType === 'team') {
+                $this->mRepo->setTeamSlot($nextMatchId, $nextSlot, $winner);
+            } else {
+                $this->mRepo->setSoloSlot($nextMatchId, $nextSlot, $winner);
             }
         }
     }
@@ -354,7 +354,7 @@ final class BracketGenerator
      *
      * @param 'solo'|'team' $participantType
      */
-    public function generateDoubleElim(int $tournamentId, string $participantType, int $bestOf = 3): void
+    public function generateDoubleElim(int $tournamentId, string $participantType, int $bestOf = 3, ?int $bestOfFinal = null): void
     {
         $entrants = $participantType === 'team'
             ? $this->listTeamEntrantsBySeed($tournamentId)
@@ -420,73 +420,75 @@ final class BracketGenerator
             }
         }
 
+        $grandBestOf = $bestOfFinal !== null ? $bestOfFinal : $bestOf;
+
         // Grand final skeleton.
         $grandId = $participantType === 'team'
-            ? $this->mRepo->createTeam($tournamentId, 'grand', 1, 1, $bestOf, null, null)
-            : $this->mRepo->createSolo($tournamentId, 'grand', 1, 1, $bestOf, null, null);
+            ? $this->mRepo->createTeam($tournamentId, 'grand', 1, 1, $grandBestOf, null, null)
+            : $this->mRepo->createSolo($tournamentId, 'grand', 1, 1, $grandBestOf, null, null);
 
         // Optional bracket reset grand final (GF2). Participants are filled only if needed.
         if ($participantType === 'team') {
-            $this->mRepo->createTeam($tournamentId, 'grand', 2, 1, $bestOf, null, null);
+            $this->mRepo->createTeam($tournamentId, 'grand', 2, 1, $grandBestOf, null, null);
         } else {
-            $this->mRepo->createSolo($tournamentId, 'grand', 2, 1, $bestOf, null, null);
+            $this->mRepo->createSolo($tournamentId, 'grand', 2, 1, $grandBestOf, null, null);
         }
 
-        // Auto-advance byes in winners bracket only (no loser drop when opponent is null).
-        for ($r = 1; $r <= $rounds; $r++) {
-            $matchesInRound = (int)($bracketSize / (2 ** $r));
-            for ($pos = 1; $pos <= $matchesInRound; $pos++) {
-                [$a, $b] = $wParts[$r][$pos] ?? [null, null];
-                $winner = null;
+        // Auto-advance byes from winners round 1 only (no loser drop when opponent is null).
+        // Important: in later rounds, NULL slots mean "TBD from previous match", not a BYE.
+        $r = 1;
+        $matchesInRound = (int)($bracketSize / (2 ** $r));
+        for ($pos = 1; $pos <= $matchesInRound; $pos++) {
+            [$a, $b] = $wParts[$r][$pos] ?? [null, null];
+            $winner = null;
 
-                if ($a !== null && $b === null) {
-                    $winner = $a;
-                } elseif ($a === null && $b !== null) {
-                    $winner = $b;
-                }
+            if ($a !== null && $b === null) {
+                $winner = $a;
+            } elseif ($a === null && $b !== null) {
+                $winner = $b;
+            }
 
-                if ($winner === null) {
-                    continue;
-                }
+            if ($winner === null) {
+                continue;
+            }
 
-                $matchId = (int)($wIds[$r][$pos] ?? 0);
-                if ($matchId <= 0) {
-                    continue;
-                }
+            $matchId = (int)($wIds[$r][$pos] ?? 0);
+            if ($matchId <= 0) {
+                continue;
+            }
 
+            if ($participantType === 'team') {
+                $this->mRepo->confirmTeamWinner($matchId, $winner);
+            } else {
+                $this->mRepo->confirmSoloWinner($matchId, $winner);
+            }
+
+            if ($rounds <= 1) {
+                // Winner bracket champion -> grand final slot 1 (bracketSize=2, no byes expected).
                 if ($participantType === 'team') {
-                    $this->mRepo->confirmTeamWinner($matchId, $winner);
+                    $this->mRepo->setTeamSlot($grandId, 1, $winner);
                 } else {
-                    $this->mRepo->confirmSoloWinner($matchId, $winner);
+                    $this->mRepo->setSoloSlot($grandId, 1, $winner);
                 }
+                continue;
+            }
 
-                if ($r >= $rounds) {
-                    // Winner bracket champion -> grand final slot 1.
-                    if ($participantType === 'team') {
-                        $this->mRepo->setTeamSlot($grandId, 1, $winner);
-                    } else {
-                        $this->mRepo->setSoloSlot($grandId, 1, $winner);
-                    }
-                    continue;
-                }
+            $nextRound = 2;
+            $nextPos = (int)(($pos + 1) / 2);
+            $nextSlot = ($pos % 2 === 1) ? 1 : 2;
+            $nextMatchId = (int)($wIds[$nextRound][$nextPos] ?? 0);
 
-                $nextRound = $r + 1;
-                $nextPos = (int)(($pos + 1) / 2);
-                $nextSlot = ($pos % 2 === 1) ? 1 : 2;
-                $nextMatchId = (int)($wIds[$nextRound][$nextPos] ?? 0);
+            if ($nextMatchId <= 0) {
+                continue;
+            }
 
-                if ($nextMatchId <= 0) {
-                    continue;
-                }
+            $wParts[$nextRound][$nextPos] ??= [null, null];
+            $wParts[$nextRound][$nextPos][$nextSlot - 1] = $winner;
 
-                $wParts[$nextRound][$nextPos] ??= [null, null];
-                $wParts[$nextRound][$nextPos][$nextSlot - 1] = $winner;
-
-                if ($participantType === 'team') {
-                    $this->mRepo->setTeamSlot($nextMatchId, $nextSlot, $winner);
-                } else {
-                    $this->mRepo->setSoloSlot($nextMatchId, $nextSlot, $winner);
-                }
+            if ($participantType === 'team') {
+                $this->mRepo->setTeamSlot($nextMatchId, $nextSlot, $winner);
+            } else {
+                $this->mRepo->setSoloSlot($nextMatchId, $nextSlot, $winner);
             }
         }
     }

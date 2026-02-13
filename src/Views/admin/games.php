@@ -9,6 +9,8 @@ use DuelDesk\View;
 /** @var array<string,string> $errors */
 /** @var string $csrfToken */
 /** @var array{width:int,height:int,mime:string,ext:string,label:string} $imageReq */
+/** @var string $query */
+/** @var string $sort */
 
 function field_error(array $errors, string $key): ?string
 {
@@ -63,7 +65,20 @@ function field_error(array $errors, string $key): ?string
 <section class="section">
     <div class="section__header">
         <h2 class="section__title">Jeux existants</h2>
-        <div class="section__meta"><?= count($games) ?> jeu(x)</div>
+        <div class="inline">
+            <form method="get" action="/admin/games" class="inline">
+                <input class="input input--compact" type="search" name="q" value="<?= View::e($query) ?>" placeholder="Rechercher..." maxlength="80">
+                <select class="select select--compact" name="sort" aria-label="Tri">
+                    <option value="name" <?= $sort === 'name' ? 'selected' : '' ?>>Nom</option>
+                    <option value="newest" <?= $sort === 'newest' ? 'selected' : '' ?>>Recents</option>
+                </select>
+                <button class="btn btn--ghost btn--compact" type="submit">OK</button>
+                <?php if (trim($query) !== ''): ?>
+                    <a class="btn btn--ghost btn--compact" href="/admin/games?<?= View::e(http_build_query(['sort' => $sort])) ?>">Reset</a>
+                <?php endif; ?>
+            </form>
+            <span class="pill pill--soft"><?= count($games) ?> jeu(x)</span>
+        </div>
     </div>
 
     <?php if ($games === []): ?>

@@ -26,6 +26,19 @@ $me = Auth::user();
 $isAuthed = $me !== null;
 $isAdmin = Auth::isAdmin();
 $csrfToken = Csrf::token();
+
+// Cache-bust assets (nginx sets long cache headers).
+$cssVer = '';
+$jsVer = '';
+try {
+    $cssPath = DUELDESK_ROOT . '/public/assets/css/app.css';
+    $jsPath = DUELDESK_ROOT . '/public/assets/js/app.js';
+    $cssVer = is_file($cssPath) ? (string)filemtime($cssPath) : '';
+    $jsVer = is_file($jsPath) ? (string)filemtime($jsPath) : '';
+} catch (Throwable) {
+    $cssVer = '';
+    $jsVer = '';
+}
 ?>
 <!doctype html>
 <html lang="fr">
@@ -40,7 +53,7 @@ $csrfToken = Csrf::token();
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
 
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="stylesheet" href="/assets/css/app.css<?= $cssVer !== '' ? '?v=' . View::e($cssVer) : '' ?>">
 </head>
 <body>
     <div class="bg">
@@ -77,6 +90,8 @@ $csrfToken = Csrf::token();
                         <?php if ($isAdmin): ?><span class="pill pill--soft">admin</span><?php endif; ?>
                     </span>
 
+                    <a class="btn btn--ghost" href="/account">Compte</a>
+
                     <form method="post" action="/logout" class="inline">
                         <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
                         <button class="btn btn--ghost" type="submit">Logout</button>
@@ -101,6 +116,6 @@ $csrfToken = Csrf::token();
         </div>
     </footer>
 
-    <script src="/assets/js/app.js" defer></script>
+    <script src="/assets/js/app.js<?= $jsVer !== '' ? '?v=' . View::e($jsVer) : '' ?>" defer></script>
 </body>
 </html>

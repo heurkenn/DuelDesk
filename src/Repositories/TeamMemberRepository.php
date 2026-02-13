@@ -81,6 +81,22 @@ final class TeamMemberRepository
         return (int)$stmt->fetchColumn();
     }
 
+    public function maxMembersForTournament(int $tournamentId): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT COALESCE(MAX(x.c), 0)'
+            . ' FROM ('
+            . '   SELECT COUNT(*) AS c'
+            . '   FROM team_members tm'
+            . '   JOIN teams t ON t.id = tm.team_id'
+            . '   WHERE t.tournament_id = :tid'
+            . '   GROUP BY tm.team_id'
+            . ' ) x'
+        );
+        $stmt->execute(['tid' => $tournamentId]);
+        return (int)$stmt->fetchColumn();
+    }
+
     public function isUserInTeam(int $teamId, int $userId): bool
     {
         $stmt = $this->pdo->prepare(

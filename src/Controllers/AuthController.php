@@ -9,6 +9,7 @@ use DuelDesk\Repositories\UserRepository;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
 use DuelDesk\Support\Flash;
+use DuelDesk\Support\RateLimit;
 use DuelDesk\View;
 
 final class AuthController
@@ -55,6 +56,24 @@ final class AuthController
 
         $errors = [];
 
+        $ip = RateLimit::ip();
+        $ipKey = 'register:ip:' . $ip;
+        $userKey = $username !== '' ? ('register:user:' . strtolower($username)) : '';
+        if (RateLimit::tooManyAttempts($ipKey, 5, 10 * 60) || ($userKey !== '' && RateLimit::tooManyAttempts($userKey, 5, 10 * 60))) {
+            $errors['username'] = 'Trop de tentatives. Reessaye plus tard.';
+        }
+
+        if ($errors !== []) {
+            View::render('auth/register', [
+                'title' => 'Inscription | DuelDesk',
+                'old' => $old,
+                'errors' => $errors,
+                'csrfToken' => Csrf::token(),
+                'redirect' => ($redirect !== '' && str_starts_with($redirect, '/')) ? $redirect : '',
+            ]);
+            return;
+        }
+
         if (!$this->isValidUsername($username)) {
             $errors['username'] = 'Username invalide (3-32, lettres/chiffres/._-).';
         }
@@ -71,6 +90,15 @@ final class AuthController
         }
 
         if ($errors !== []) {
+            try {
+                RateLimit::hit($ipKey, 10 * 60);
+                if ($userKey !== '') {
+                    RateLimit::hit($userKey, 10 * 60);
+                }
+            } catch (\Throwable) {
+                // Ignore rate limit storage failures.
+            }
+
             View::render('auth/register', [
                 'title' => 'Inscription | DuelDesk',
                 'old' => $old,
@@ -91,6 +119,15 @@ final class AuthController
 
         $userId = $repo->create($username, $hash, $role);
         Auth::login($userId);
+
+        try {
+            RateLimit::clear($ipKey);
+            if ($userKey !== '') {
+                RateLimit::clear($userKey);
+            }
+        } catch (\Throwable) {
+            // Ignore rate limit storage failures.
+        }
 
         Flash::set('success', $role === 'admin' ? 'Compte admin cree.' : 'Compte cree.');
 
@@ -139,6 +176,24 @@ final class AuthController
         $old = ['username' => $username];
         $errors = [];
 
+        $ip = RateLimit::ip();
+        $ipKey = 'login:ip:' . $ip;
+        $userKey = $username !== '' ? ('login:user:' . strtolower($username)) : '';
+        if (RateLimit::tooManyAttempts($ipKey, 10, 5 * 60) || ($userKey !== '' && RateLimit::tooManyAttempts($userKey, 10, 5 * 60))) {
+            $errors['username'] = 'Trop de tentatives. Reessaye dans quelques minutes.';
+        }
+
+        if ($errors !== []) {
+            View::render('auth/login', [
+                'title' => 'Connexion | DuelDesk',
+                'old' => $old,
+                'errors' => $errors,
+                'csrfToken' => Csrf::token(),
+                'redirect' => ($redirect !== '' && str_starts_with($redirect, '/')) ? $redirect : '',
+            ]);
+            return;
+        }
+
         if ($username === '') {
             $errors['username'] = 'Username requis.';
         }
@@ -152,6 +207,15 @@ final class AuthController
         if ($errors === []) {
             $hash = is_array($user) ? (string)($user['password_hash'] ?? '') : '';
             if (!is_array($user) || $hash === '' || !password_verify($password, $hash)) {
+                try {
+                    RateLimit::hit($ipKey, 5 * 60);
+                    if ($userKey !== '') {
+                        RateLimit::hit($userKey, 5 * 60);
+                    }
+                } catch (\Throwable) {
+                    // Ignore rate limit storage failures.
+                }
+
                 $errors['username'] = 'Identifiants invalides.';
             }
         }
@@ -169,6 +233,15 @@ final class AuthController
 
         Auth::login((int)$user['id']);
         Flash::set('success', 'Connecte.');
+
+        try {
+            RateLimit::clear($ipKey);
+            if ($userKey !== '') {
+                RateLimit::clear($userKey);
+            }
+        } catch (\Throwable) {
+            // Ignore rate limit storage failures.
+        }
 
         $dest = '/';
         if ($redirect !== '' && str_starts_with($redirect, '/')) {

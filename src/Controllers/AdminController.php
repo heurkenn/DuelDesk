@@ -45,13 +45,27 @@ final class AdminController
         Auth::requireAdmin();
 
         $repo = new UserRepository();
+        $query = trim((string)($_GET['q'] ?? ''));
+        $pageRaw = trim((string)($_GET['page'] ?? '1'));
+        $page = (ctype_digit($pageRaw) && (int)$pageRaw > 0) ? (int)$pageRaw : 1;
+        $perPage = 40;
+
+        $total = $repo->countSearch($query);
+        $pages = max(1, (int)ceil($total / $perPage));
+        if ($page > $pages) {
+            $page = $pages;
+        }
 
         View::render('admin/users', [
             'title' => 'Utilisateurs | Admin | DuelDesk',
-            'users' => $repo->all(),
+            'users' => $repo->searchPaged($query, $page, $perPage),
             'csrfToken' => Csrf::token(),
             'meId' => Auth::id() ?? 0,
             'adminCount' => $repo->countAdmins(),
+            'query' => $query,
+            'page' => $page,
+            'pages' => $pages,
+            'total' => $total,
         ]);
     }
 

@@ -5,7 +5,7 @@ declare(strict_types=1);
 use DuelDesk\View;
 
 /** @var list<array<string, mixed>> $games */
-/** @var array{name:string,game_id:string,format:string,participant_type:string,team_size:string,max_entrants:string,signup_closes_at:string,best_of_default:string,status:string,starts_at:string} $old */
+/** @var array{name:string,game_id:string,format:string,participant_type:string,team_size:string,max_entrants:string,signup_closes_at:string,best_of_default:string,best_of_final:string,status:string,starts_at:string} $old */
 /** @var array<string,string> $errors */
 /** @var string $csrfToken */
 
@@ -85,6 +85,20 @@ function field_error(array $errors, string $key): ?string
                 </select>
                 <?php if (field_error($errors, 'best_of_default')): ?>
                     <span class="field__error"><?= View::e((string)field_error($errors, 'best_of_default')) ?></span>
+                <?php endif; ?>
+            </label>
+
+            <label class="field">
+                <span class="field__label">Best-of (finale)</span>
+                <select class="select<?= field_error($errors, 'best_of_final') ? ' input--error' : '' ?>" name="best_of_final">
+                    <option value="" <?= ($old['best_of_final'] ?? '') === '' ? 'selected' : '' ?>>Defaut (BO<?= View::e((string)($old['best_of_default'] ?? '3')) ?>)</option>
+                    <?php foreach (['1', '3', '5', '7', '9'] as $bo): ?>
+                        <option value="<?= View::e($bo) ?>" <?= ($old['best_of_final'] ?? '') === $bo ? 'selected' : '' ?>>BO<?= View::e($bo) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <span class="muted">Override uniquement pour la finale (GF/GF2).</span>
+                <?php if (field_error($errors, 'best_of_final')): ?>
+                    <span class="field__error"><?= View::e((string)field_error($errors, 'best_of_final')) ?></span>
                 <?php endif; ?>
             </label>
 

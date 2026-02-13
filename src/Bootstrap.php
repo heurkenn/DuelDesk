@@ -58,6 +58,16 @@ set_exception_handler(static function (Throwable $e): void {
         return;
     }
 
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "Internal Server Error\n";
+    header('Content-Type: text/html; charset=utf-8');
+    try {
+        \DuelDesk\View::render('errors/error', [
+            'title' => '500 | DuelDesk',
+            'code' => 500,
+            'heading' => '500',
+            'message' => 'Erreur interne du serveur.',
+        ]);
+    } catch (Throwable) {
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Internal Server Error\n";
+    }
 });

@@ -99,7 +99,9 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - Double elim:
 - winners bracket, losers bracket, grand final.
 - propagation winners/losers lors du reporting admin.
-- Auto-advance des BYE dans winners uniquement.
+- Auto-advance des BYE:
+- winners: uniquement en round 1 (evite d'avancer des matchs "TBD").
+- losers: auto-advance quand un slot est "mort" (venant d'un winners BYE) pour eviter de bloquer le bracket.
 
 ### Fichiers touches
 - Generation: `src/Services/BracketGenerator.php`
@@ -365,20 +367,208 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - team: uniquement les capitaines des equipes du match (ou admin)
 - Regles:
 - impossible de reporter si match `confirmed` / `void` / incomplet (TBD)
-- si le match est deja `reported` par quelqu'un d'autre: blocage (dispute flow a faire plus tard)
+- si le match est deja `reported` par l'autre joueur/capitaine: contre-report possible -> status `disputed`
 - Admin:
 - page admin tournoi affiche `reported` + "par {username}"
 - prefill automatique des inputs avec les valeurs `reported_*`
 - bouton "Rejeter" (clear report + retour `pending/scheduled`)
+- Dispute flow (counter-report):
+- si l'autre joueur/capitaine reporte un score different -> status `disputed`
+- admin voit les deux versions (A/B) et peut confirmer A ou B, ou rejeter
 - Page match:
 - affiche le report (score + winner + qui + quand) quand status `reported`
+- affiche les 2 reports quand status `disputed`
 - affiche un formulaire "Reporter le score" pour les users eligibles
 
 ### Fichiers touches
-- Migration: `database/migrations/010_match_reporting.sql`
+- Migrations: `database/migrations/010_match_reporting.sql`, `database/migrations/011_match_disputes.sql`
 - Routes: `public/index.php`
 - Controller: `src/Controllers/MatchReportController.php`, `src/Controllers/AdminTournamentController.php`, `src/Controllers/TournamentController.php`
 - Repos: `src/Repositories/MatchRepository.php`, `src/Repositories/TeamMemberRepository.php`
 - Views: `src/Views/admin/tournament.php`, `src/Views/tournaments/match.php`
 - Seed (admin de demo): `bin/seed_demo.php`
+- `TODO.md`
+
+## Etape 22 - Admin: supprimer un tournoi
+
+### Ce qui a ete fait
+- Ajout d'un bouton "Supprimer" dans la page admin du tournoi (avec confirmation JS).
+- Route admin: `POST /admin/tournaments/{id}/delete`
+- Suppression DB: `DELETE FROM tournaments` (CASCADE sur matches / teams / inscriptions via FK).
+
+### Fichiers touches
+- Routes: `public/index.php`
+- Controller: `src/Controllers/AdminTournamentController.php`
+- Repo: `src/Repositories/TournamentRepository.php`
+- View: `src/Views/admin/tournament.php`
+- `TODO.md`
+
+## Etape 23 - Admin games: resize/crop auto + recherche/tri
+
+### Ce qui a ete fait
+- Upload image jeux: PNG (<=6MB), re-encode + crop-fill vers la taille cible (env `GAME_IMAGE_WIDTH`/`GAME_IMAGE_HEIGHT`, default 512x512) via GD.
+- Update image: remplace l'image existante + update meta (width/height/mime).
+- Admin games: recherche `q` + tri `sort=name|newest`.
+
+### Fichiers touches
+- Docker: `docker/php/Dockerfile` (install ext-gd)
+- Controller: `src/Controllers/AdminGameController.php`
+- Repo: `src/Repositories/GameRepository.php`
+- View: `src/Views/admin/games.php`
+- Env: `.env.example`
+- `TODO.md`
+
+## Etape 24 - Admin tournois: edition config (name/game/format/type/team_size) + reset bracket safe
+
+### Ce qui a ete fait
+- Form "Configuration" dans `/admin/tournaments/{id}`.
+- Rename + changement de jeu: toujours autorises.
+- Format/participant_type/team_size: autorises uniquement si aucun match confirme.
+- Si un bracket existe mais aucun match confirme: changement structure -> reset auto (suppression des matchs).
+- Protections:
+- interdit de changer `participant_type` si des inscriptions existent deja.
+- interdit de reduire `team_size` sous la taille max des rosters existants.
+
+### Fichiers touches
+- Routes: `public/index.php`
+- Controller: `src/Controllers/AdminTournamentController.php`
+- Repos: `src/Repositories/TournamentRepository.php`, `src/Repositories/MatchRepository.php`, `src/Repositories/TeamMemberRepository.php`
+- View: `src/Views/admin/tournament.php`
+- CSS: `public/assets/css/app.css`
+- `TODO.md`
+
+## Etape 25 - Audit log
+
+### Ce qui a ete fait
+- DB: table `audit_logs` + repo.
+- Enregistre les actions principales:
+- joueurs/capitaines reportent un score (`match.report`)
+- admin confirme (`match.confirm`) / rejette (`match.report.reject`)
+- bracket generate/reset
+- update config/settings tournoi
+- delete tournoi (log global avec `tournament_id` NULL)
+- UI: section "Audit" sur la page admin tournoi.
+
+### Fichiers touches
+- Migration: `database/migrations/012_audit_logs.sql`
+- Repo: `src/Repositories/AuditLogRepository.php`
+- Controllers: `src/Controllers/MatchReportController.php`, `src/Controllers/AdminTournamentController.php`
+- View: `src/Views/admin/tournament.php`
+- `TODO.md`
+
+## Etape 26 - Securite: rate limit login/register
+
+### Ce qui a ete fait
+- DB: table `rate_limits`.
+- Support: `RateLimit` (key -> hits/reset_at).
+- Auth: throttle sur `login` (10 essais / 5min) et `register` (5 essais / 10min) par IP + par username.
+- Clear sur succes, hit sur echec.
+
+### Fichiers touches
+- Migration: `database/migrations/013_rate_limits.sql`
+- Support: `src/Support/RateLimit.php`
+- Controller: `src/Controllers/AuthController.php`
+- `TODO.md`
+
+## Etape 27 - Pages d'erreur (404/400/403/500)
+
+### Ce qui a ete fait
+- Vue `errors/error.php` + `Response` rend maintenant du HTML.
+- Exception handler prod rend une page 500 (fallback plain text si render fail).
+
+### Fichiers touches
+- View: `src/Views/errors/error.php`
+- HTTP: `src/Http/Response.php`
+- Bootstrap: `src/Bootstrap.php`
+- `TODO.md`
+
+## Etape 28 - Pagination + recherche
+
+### Ce qui a ete fait
+- `/tournaments`: recherche `q` + pagination `page` (20/page).
+- `/admin/users`: recherche `q` + pagination (40/page).
+
+### Fichiers touches
+- Repo: `src/Repositories/TournamentRepository.php`, `src/Repositories/UserRepository.php`
+- Controllers: `src/Controllers/TournamentController.php`, `src/Controllers/AdminController.php`
+- Views: `src/Views/tournaments/index.php`, `src/Views/admin/users.php`
+- `TODO.md`
+
+## Etape 29 - Bracket UX: center on current round + perf CSS
+
+### Ce qui a ete fait
+- Onglet Bracket: bouton "Round" -> centre sur le prochain match jouable (non confirme, non TBD).
+- Perf CSS: ajout de `contain` sur matrix/grids + `will-change: transform` pour le zoom.
+
+### Fichiers touches
+- View: `src/Views/tournaments/show.php`
+- JS: `public/assets/js/app.js`
+- CSS: `public/assets/css/app.css`
+- `TODO.md`
+
+## Etape 30 - Bracket: export SVG + print/PDF
+
+### Ce qui a ete fait
+- Onglet Bracket: boutons `SVG` et `PDF`.
+- SVG: export via `<foreignObject>` (HTML bracket + SVG lines) dans un fichier `.svg`.
+- PDF: active l'onglet bracket + `window.print()` + CSS `@media print` (cache le reste du site).
+
+### Fichiers touches
+- View: `src/Views/tournaments/show.php`
+- JS: `public/assets/js/app.js`
+- CSS: `public/assets/css/app.css`
+- `TODO.md`
+
+## Etape 31 - Script dev (docker + db)
+
+### Ce qui a ete fait
+- Ajout d'un script unique pour lancer/stopper le stack docker + migrations + seed.
+- Commandes: `up`, `down`, `reset`, `ps`, `logs`, `migrate`, `seed`, `sh`, `db`.
+
+### Fichiers touches
+- Script: `bin/dev.sh`
+- Doc: `README.md`
+
+## Etape 32 - Finale: best-of override + preparation rulesets (CS2)
+
+### Ce qui a ete fait
+- Ajout d'un champ optionnel `best_of_final` sur les tournois.
+- UI creation tournoi + admin settings: "Best-of (finale)" (defaut = best_of_default).
+- Generation bracket: GF/GF2 utilisent `best_of_final` si defini.
+- TODO: ajout d'une section "Rulesets (par jeu)" + preparation pick/ban maps CS2 (MAPBAN.GG, map pool, sequence BO3).
+
+### Fichiers touches
+- Migration: `database/migrations/014_tournament_best_of_final.sql`
+- Controllers: `src/Controllers/TournamentController.php`, `src/Controllers/AdminTournamentController.php`
+- Repo: `src/Repositories/TournamentRepository.php`
+- Service: `src/Services/BracketGenerator.php`
+- Views: `src/Views/tournaments/new.php`, `src/Views/tournaments/show.php`, `src/Views/admin/tournament.php`
+- `TODO.md`
+
+## Etape 33 - Discord: liaison compte (OAuth2 identify)
+
+### Ce qui a ete fait
+- Page compte: `GET /account` (etat Discord + bouton connecter/deconnecter).
+- OAuth2 "identify" Discord:
+- `GET /account/discord/connect` -> redirect Discord authorize + state en session.
+- `GET /account/discord/callback` -> exchange code -> `/users/@me` -> stocke sur `users`.
+- `POST /account/discord/disconnect` -> unlink.
+- Champs stockes sur `users`:
+- `discord_user_id` (unique)
+- `discord_username`, `discord_global_name`, `discord_avatar`
+- Integration optionnelle (best-effort via env):
+- Auto-role Discord a l'inscription (bot): `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_ROLE_ID_PARTICIPANT`
+- Annonce webhook lors du `bracket.generate`: `DISCORD_WEBHOOK_URL`
+
+### Fichiers touches
+- Routes: `public/index.php`
+- Controller: `src/Controllers/AccountController.php`
+- View: `src/Views/account/index.php`
+- Layout nav: `src/Views/layout.php`
+- Repo: `src/Repositories/UserRepository.php`
+- Support: `src/Support/Discord.php`
+- Signup: `src/Controllers/TournamentSignupController.php`, `src/Controllers/TournamentTeamController.php`
+- Admin bracket: `src/Controllers/AdminTournamentController.php`
+- Migration: `database/migrations/015_discord_users.sql`
+- Env: `.env.example`, `docker-compose.yml`
 - `TODO.md`

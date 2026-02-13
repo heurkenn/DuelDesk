@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DuelDesk\Controllers;
 
 use DuelDesk\Http\Response;
+use DuelDesk\Repositories\AuditLogRepository;
 use DuelDesk\Repositories\MatchRepository;
 use DuelDesk\Repositories\PlayerRepository;
 use DuelDesk\Repositories\TeamMemberRepository;
@@ -53,14 +54,6 @@ final class MatchReportController
         $st = (string)($match['status'] ?? 'pending');
         if (in_array($st, ['confirmed', 'void'], true)) {
             Flash::set('error', 'Ce match ne peut pas etre reporte.');
-            Response::redirect('/tournaments/' . $tournamentId . '/matches/' . $matchId);
-        }
-
-        // If already reported by someone else, block until admin resolves (dispute flow later).
-        $reportedBy = $match['reported_by_user_id'] ?? null;
-        $reportedById = (is_int($reportedBy) || is_string($reportedBy)) ? (int)$reportedBy : 0;
-        if ($st === 'reported' && $reportedById > 0 && $reportedById !== $meId && !Auth::isAdmin()) {
-            Flash::set('error', 'Score deja reporte. Contacte un admin en cas de litige.');
             Response::redirect('/tournaments/' . $tournamentId . '/matches/' . $matchId);
         }
 
@@ -131,9 +124,33 @@ final class MatchReportController
             }
         }
 
-        $mRepo->reportResult($matchId, $score1, $score2, (int)$winnerSlot, $meId);
+        try {
+            $mRepo->reportResult($matchId, $score1, $score2, (int)$winnerSlot, $meId);
+        } catch (\Throwable $e) {
+            Flash::set('error', $e->getMessage());
+            Response::redirect('/tournaments/' . $tournamentId . '/matches/' . $matchId);
+        }
 
-        Flash::set('success', 'Score reporte. En attente de validation admin.');
+        $updated = $mRepo->findById($matchId);
+        $newStatus = is_array($updated) ? (string)($updated['status'] ?? '') : '';
+
+        try {
+            $aRepo = new AuditLogRepository();
+            $aRepo->create($tournamentId, $meId, 'match.report', 'match', $matchId, [
+                'status' => $newStatus,
+                'score1' => $score1,
+                'score2' => $score2,
+                'winner_slot' => (int)$winnerSlot,
+            ]);
+        } catch (\Throwable) {
+            // Ignore audit failures.
+        }
+
+        if ($newStatus === 'disputed') {
+            Flash::set('success', 'Score contre-reporte. Match en litige (validation admin requise).');
+        } else {
+            Flash::set('success', 'Score reporte. En attente de validation admin.');
+        }
         Response::redirect('/tournaments/' . $tournamentId . '/matches/' . $matchId);
     }
 
@@ -182,4 +199,3 @@ final class MatchReportController
         return $match['player1_id'] !== null && $match['player2_id'] !== null;
     }
 }
-

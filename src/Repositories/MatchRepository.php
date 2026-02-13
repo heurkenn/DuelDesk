@@ -47,11 +47,13 @@ final class MatchRepository
     public function findSoloDetailed(int $id): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT m.*, p1.handle AS p1_name, p2.handle AS p2_name, ru.username AS reported_by_username'
+            'SELECT m.*, p1.handle AS p1_name, p2.handle AS p2_name,'
+            . ' ru.username AS reported_by_username, cu.username AS counter_reported_by_username'
             . ' FROM matches m'
             . ' LEFT JOIN players p1 ON p1.id = m.player1_id'
             . ' LEFT JOIN players p2 ON p2.id = m.player2_id'
             . ' LEFT JOIN users ru ON ru.id = m.reported_by_user_id'
+            . ' LEFT JOIN users cu ON cu.id = m.counter_reported_by_user_id'
             . ' WHERE m.id = :id'
             . ' LIMIT 1'
         );
@@ -64,11 +66,13 @@ final class MatchRepository
     public function findTeamDetailed(int $id): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT m.*, t1.name AS t1_name, t2.name AS t2_name, ru.username AS reported_by_username'
+            'SELECT m.*, t1.name AS t1_name, t2.name AS t2_name,'
+            . ' ru.username AS reported_by_username, cu.username AS counter_reported_by_username'
             . ' FROM matches m'
             . ' LEFT JOIN teams t1 ON t1.id = m.team1_id'
             . ' LEFT JOIN teams t2 ON t2.id = m.team2_id'
             . ' LEFT JOIN users ru ON ru.id = m.reported_by_user_id'
+            . ' LEFT JOIN users cu ON cu.id = m.counter_reported_by_user_id'
             . ' WHERE m.id = :id'
             . ' LIMIT 1'
         );
@@ -80,6 +84,13 @@ final class MatchRepository
     public function countForTournament(int $tournamentId): int
     {
         $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM matches WHERE tournament_id = :tid');
+        $stmt->execute(['tid' => $tournamentId]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    public function countConfirmedForTournament(int $tournamentId): int
+    {
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM matches WHERE tournament_id = :tid AND status = 'confirmed'");
         $stmt->execute(['tid' => $tournamentId]);
         return (int)$stmt->fetchColumn();
     }
@@ -178,6 +189,162 @@ final class MatchRepository
 
     public function reportResult(int $matchId, int $score1, int $score2, int $winnerSlot, int $reportedByUserId): void
     {
+        $match = $this->findById($matchId);
+        if (!is_array($match)) {
+            throw new \RuntimeException('Match not found');
+        }
+
+        $status = (string)($match['status'] ?? 'pending');
+        $repUid = $match['reported_by_user_id'] ?? null;
+        $repUid = (is_int($repUid) || is_string($repUid)) ? (int)$repUid : 0;
+        $ctrUid = $match['counter_reported_by_user_id'] ?? null;
+        $ctrUid = (is_int($ctrUid) || is_string($ctrUid)) ? (int)$ctrUid : 0;
+
+        $repS1 = $match['reported_score1'] ?? null;
+        $repS2 = $match['reported_score2'] ?? null;
+        $repWs = $match['reported_winner_slot'] ?? null;
+
+        $sameAsReported = ($repS1 !== null && $repS2 !== null && $repWs !== null)
+            && ((int)$repS1 === $score1)
+            && ((int)$repS2 === $score2)
+            && ((int)$repWs === $winnerSlot);
+
+        if ($status === 'disputed') {
+            // Update "my" side of the dispute. Only two reporters are supported (A/B).
+            $bucket = null;
+            if ($repUid > 0 && $repUid === $reportedByUserId) {
+                $bucket = 'reported';
+            } elseif ($ctrUid > 0 && $ctrUid === $reportedByUserId) {
+                $bucket = 'counter';
+            } elseif ($repUid <= 0) {
+                $bucket = 'reported';
+            } elseif ($ctrUid <= 0) {
+                $bucket = 'counter';
+            }
+
+            if ($bucket === null) {
+                throw new \RuntimeException('Too many reporters for this match');
+            }
+
+            if ($bucket === 'reported') {
+                $stmt = $this->pdo->prepare(
+                    "UPDATE matches SET"
+                    . " reported_score1 = :s1,"
+                    . " reported_score2 = :s2,"
+                    . " reported_winner_slot = :ws,"
+                    . " reported_by_user_id = :uid,"
+                    . " reported_at = NOW()"
+                    . " WHERE id = :id"
+                );
+                $stmt->execute([
+                    's1' => $score1,
+                    's2' => $score2,
+                    'ws' => $winnerSlot,
+                    'uid' => $reportedByUserId,
+                    'id' => $matchId,
+                ]);
+            } else {
+                $stmt = $this->pdo->prepare(
+                    "UPDATE matches SET"
+                    . " counter_reported_score1 = :s1,"
+                    . " counter_reported_score2 = :s2,"
+                    . " counter_reported_winner_slot = :ws,"
+                    . " counter_reported_by_user_id = :uid,"
+                    . " counter_reported_at = NOW()"
+                    . " WHERE id = :id"
+                );
+                $stmt->execute([
+                    's1' => $score1,
+                    's2' => $score2,
+                    'ws' => $winnerSlot,
+                    'uid' => $reportedByUserId,
+                    'id' => $matchId,
+                ]);
+            }
+
+            $updated = $this->findById($matchId);
+            if (is_array($updated)
+                && $updated['reported_score1'] !== null
+                && $updated['reported_score2'] !== null
+                && $updated['reported_winner_slot'] !== null
+                && $updated['counter_reported_score1'] !== null
+                && $updated['counter_reported_score2'] !== null
+                && $updated['counter_reported_winner_slot'] !== null
+            ) {
+                $a = [(int)$updated['reported_score1'], (int)$updated['reported_score2'], (int)$updated['reported_winner_slot']];
+                $b = [(int)$updated['counter_reported_score1'], (int)$updated['counter_reported_score2'], (int)$updated['counter_reported_winner_slot']];
+                if ($a === $b) {
+                    // Both sides agree -> collapse back to a single report.
+                    $this->pdo->prepare(
+                        "UPDATE matches SET"
+                        . " status = 'reported',"
+                        . " counter_reported_score1 = NULL,"
+                        . " counter_reported_score2 = NULL,"
+                        . " counter_reported_winner_slot = NULL,"
+                        . " counter_reported_by_user_id = NULL,"
+                        . " counter_reported_at = NULL"
+                        . " WHERE id = :id"
+                    )->execute(['id' => $matchId]);
+                }
+            }
+
+            return;
+        }
+
+        if ($status === 'reported') {
+            // Second reporter can counter-report (dispute). Same score => keep `reported`.
+            if ($repUid > 0 && $repUid !== $reportedByUserId) {
+                if ($sameAsReported) {
+                    return;
+                }
+
+                $stmt = $this->pdo->prepare(
+                    "UPDATE matches SET"
+                    . " counter_reported_score1 = :s1,"
+                    . " counter_reported_score2 = :s2,"
+                    . " counter_reported_winner_slot = :ws,"
+                    . " counter_reported_by_user_id = :uid,"
+                    . " counter_reported_at = NOW(),"
+                    . " status = 'disputed'"
+                    . " WHERE id = :id"
+                );
+                $stmt->execute([
+                    's1' => $score1,
+                    's2' => $score2,
+                    'ws' => $winnerSlot,
+                    'uid' => $reportedByUserId,
+                    'id' => $matchId,
+                ]);
+                return;
+            }
+
+            // Same reporter editing their report.
+            $stmt = $this->pdo->prepare(
+                "UPDATE matches SET"
+                . " reported_score1 = :s1,"
+                . " reported_score2 = :s2,"
+                . " reported_winner_slot = :ws,"
+                . " reported_by_user_id = :uid,"
+                . " reported_at = NOW(),"
+                . " counter_reported_score1 = NULL,"
+                . " counter_reported_score2 = NULL,"
+                . " counter_reported_winner_slot = NULL,"
+                . " counter_reported_by_user_id = NULL,"
+                . " counter_reported_at = NULL,"
+                . " status = 'reported'"
+                . " WHERE id = :id"
+            );
+            $stmt->execute([
+                's1' => $score1,
+                's2' => $score2,
+                'ws' => $winnerSlot,
+                'uid' => $reportedByUserId,
+                'id' => $matchId,
+            ]);
+            return;
+        }
+
+        // First report (pending/scheduled/in_progress).
         $stmt = $this->pdo->prepare(
             "UPDATE matches SET"
             . " reported_score1 = :s1,"
@@ -185,6 +352,11 @@ final class MatchRepository
             . " reported_winner_slot = :ws,"
             . " reported_by_user_id = :uid,"
             . " reported_at = NOW(),"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " status = 'reported'"
             . " WHERE id = :id"
         );
@@ -206,6 +378,11 @@ final class MatchRepository
             . " reported_winner_slot = NULL,"
             . " reported_by_user_id = NULL,"
             . " reported_at = NULL,"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " status = CASE WHEN scheduled_at IS NULL THEN 'pending' ELSE 'scheduled' END"
             . " WHERE id = :id"
         );
@@ -227,6 +404,11 @@ final class MatchRepository
             . " reported_winner_slot = NULL,"
             . " reported_by_user_id = NULL,"
             . " reported_at = NULL,"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " winner_id = NULL,"
             . " winner_team_id = NULL,"
             . " scheduled_at = NULL,"
@@ -251,6 +433,11 @@ final class MatchRepository
             . " reported_winner_slot = NULL,"
             . " reported_by_user_id = NULL,"
             . " reported_at = NULL,"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " winner_id = NULL,"
             . " winner_team_id = NULL,"
             . " status = CASE WHEN scheduled_at IS NULL THEN 'pending' ELSE 'scheduled' END"
@@ -278,6 +465,11 @@ final class MatchRepository
             . " reported_winner_slot = NULL,"
             . " reported_by_user_id = NULL,"
             . " reported_at = NULL,"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " winner_team_id = NULL,"
             . " winner_id = NULL,"
             . " status = CASE WHEN scheduled_at IS NULL THEN 'pending' ELSE 'scheduled' END"
@@ -302,6 +494,11 @@ final class MatchRepository
             . " reported_winner_slot = NULL,"
             . " reported_by_user_id = NULL,"
             . " reported_at = NULL,"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " status = 'confirmed'"
             . " WHERE id = :id"
         );
@@ -323,6 +520,11 @@ final class MatchRepository
             . " reported_winner_slot = NULL,"
             . " reported_by_user_id = NULL,"
             . " reported_at = NULL,"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " status = 'confirmed'"
             . " WHERE id = :id"
         );
@@ -341,6 +543,11 @@ final class MatchRepository
             . " reported_winner_slot = NULL,"
             . " reported_by_user_id = NULL,"
             . " reported_at = NULL,"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " status = 'confirmed'"
             . " WHERE id = :id"
         );
@@ -362,6 +569,11 @@ final class MatchRepository
             . " reported_winner_slot = NULL,"
             . " reported_by_user_id = NULL,"
             . " reported_at = NULL,"
+            . " counter_reported_score1 = NULL,"
+            . " counter_reported_score2 = NULL,"
+            . " counter_reported_winner_slot = NULL,"
+            . " counter_reported_by_user_id = NULL,"
+            . " counter_reported_at = NULL,"
             . " status = 'confirmed'"
             . " WHERE id = :id"
         );
@@ -372,11 +584,13 @@ final class MatchRepository
     public function listSoloForTournament(int $tournamentId): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT m.*, p1.handle AS p1_name, p2.handle AS p2_name, ru.username AS reported_by_username'
+            'SELECT m.*, p1.handle AS p1_name, p2.handle AS p2_name,'
+            . ' ru.username AS reported_by_username, cu.username AS counter_reported_by_username'
             . ' FROM matches m'
             . ' LEFT JOIN players p1 ON p1.id = m.player1_id'
             . ' LEFT JOIN players p2 ON p2.id = m.player2_id'
             . ' LEFT JOIN users ru ON ru.id = m.reported_by_user_id'
+            . ' LEFT JOIN users cu ON cu.id = m.counter_reported_by_user_id'
             . ' WHERE m.tournament_id = :tid'
             . ' ORDER BY m.bracket ASC, m.round ASC, m.round_pos ASC, m.id ASC'
         );
@@ -390,11 +604,13 @@ final class MatchRepository
     public function listTeamForTournament(int $tournamentId): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT m.*, t1.name AS t1_name, t2.name AS t2_name, ru.username AS reported_by_username'
+            'SELECT m.*, t1.name AS t1_name, t2.name AS t2_name,'
+            . ' ru.username AS reported_by_username, cu.username AS counter_reported_by_username'
             . ' FROM matches m'
             . ' LEFT JOIN teams t1 ON t1.id = m.team1_id'
             . ' LEFT JOIN teams t2 ON t2.id = m.team2_id'
             . ' LEFT JOIN users ru ON ru.id = m.reported_by_user_id'
+            . ' LEFT JOIN users cu ON cu.id = m.counter_reported_by_user_id'
             . ' WHERE m.tournament_id = :tid'
             . ' ORDER BY m.bracket ASC, m.round ASC, m.round_pos ASC, m.id ASC'
         );

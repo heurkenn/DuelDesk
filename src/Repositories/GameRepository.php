@@ -29,6 +29,34 @@ final class GameRepository
         return $stmt->fetchAll();
     }
 
+    /** @return list<array<string, mixed>> */
+    public function search(string $query, string $sort = 'name'): array
+    {
+        $query = trim($query);
+        $sort = trim($sort);
+
+        $orderBy = 'name ASC';
+        if ($sort === 'newest') {
+            $orderBy = 'created_at DESC, name ASC';
+        }
+
+        // Simple "contains" search (case-insensitive with utf8mb4_unicode_ci).
+        $sql = 'SELECT * FROM games';
+        $params = [];
+
+        if ($query !== '') {
+            $sql .= ' WHERE name LIKE :q';
+            $params['q'] = '%' . $query . '%';
+        }
+
+        $sql .= ' ORDER BY ' . $orderBy;
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        /** @var list<array<string, mixed>> */
+        return $stmt->fetchAll();
+    }
+
     /** @return array<string, mixed>|null */
     public function findById(int $id): ?array
     {
@@ -78,6 +106,19 @@ final class GameRepository
     {
         $stmt = $this->pdo->prepare('UPDATE games SET name = :name WHERE id = :id');
         $stmt->execute(['name' => $name, 'id' => $id]);
+    }
+
+    public function updateImageMeta(int $id, int $imageWidth, int $imageHeight, string $imageMime): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE games SET image_width = :image_width, image_height = :image_height, image_mime = :image_mime WHERE id = :id'
+        );
+        $stmt->execute([
+            'image_width' => $imageWidth,
+            'image_height' => $imageHeight,
+            'image_mime' => $imageMime,
+            'id' => $id,
+        ]);
     }
 
     public function delete(int $id): void

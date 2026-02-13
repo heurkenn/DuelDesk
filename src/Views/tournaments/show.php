@@ -122,6 +122,11 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
     $reportedWinnerSlot = $m['reported_winner_slot'] ?? null;
     $reportedByUsername = (string)($m['reported_by_username'] ?? '');
     $reportedAt = is_string($m['reported_at'] ?? null) ? (string)$m['reported_at'] : '';
+    $counterScore1 = $m['counter_reported_score1'] ?? null;
+    $counterScore2 = $m['counter_reported_score2'] ?? null;
+    $counterWinnerSlot = $m['counter_reported_winner_slot'] ?? null;
+    $counterByUsername = (string)($m['counter_reported_by_username'] ?? '');
+    $counterAt = is_string($m['counter_reported_at'] ?? null) ? (string)$m['counter_reported_at'] : '';
 
     if ($participantType === 'team') {
         $aId = $m['team1_id'] !== null ? (int)$m['team1_id'] : null;
@@ -148,7 +153,7 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
     $bWin = $win !== null && $bId !== null && $win === $bId;
     $winnerSlot = $aWin ? 1 : ($bWin ? 2 : 0);
 
-    $isReported = ($st === 'reported')
+    $isReported = in_array($st, ['reported', 'disputed'], true)
         && ($aId !== null) && ($bId !== null)
         && ($reportedScore1 !== null) && ($reportedScore2 !== null);
     $showScores = (($st === 'confirmed') && ($aId !== null) && ($bId !== null)) || $isReported;
@@ -164,7 +169,7 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
     ?>
     <a
         href="<?= View::e($href) ?>"
-        class="matchcard matchcard--clickable<?= $st === 'confirmed' ? ' is-confirmed' : '' ?><?= $isReported ? ' is-reported' : '' ?>"
+        class="matchcard matchcard--clickable<?= $st === 'confirmed' ? ' is-confirmed' : '' ?><?= $st === 'reported' ? ' is-reported' : '' ?><?= $st === 'disputed' ? ' is-disputed' : '' ?>"
         <?= $style !== '' ? ' style="' . View::e($style) . '"' : '' ?>
         data-match-id="<?= (int)$matchId ?>"
         data-key="<?= View::e($bracket . ':' . $round . ':' . $roundPos) ?>"
@@ -180,6 +185,11 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
         data-reported-winner-slot="<?= $reportedWinnerSlot !== null ? (int)$reportedWinnerSlot : '' ?>"
         data-reported-by="<?= View::e($reportedByUsername) ?>"
         data-reported-at="<?= View::e($reportedAt) ?>"
+        data-counter-reported-score1="<?= $counterScore1 !== null ? (int)$counterScore1 : '' ?>"
+        data-counter-reported-score2="<?= $counterScore2 !== null ? (int)$counterScore2 : '' ?>"
+        data-counter-reported-winner-slot="<?= $counterWinnerSlot !== null ? (int)$counterWinnerSlot : '' ?>"
+        data-counter-reported-by="<?= View::e($counterByUsername) ?>"
+        data-counter-reported-at="<?= View::e($counterAt) ?>"
         data-a-name="<?= View::e($aLabel) ?>"
         data-b-name="<?= View::e($bLabel) ?>"
         data-score1="<?= (int)$score1 ?>"
@@ -461,6 +471,18 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
         <div class="inline">
             <?php if ($format === 'double_elim' && $matches !== []): ?>
                 <button class="btn btn--ghost btn--compact" type="button" data-toggle-drop-lines aria-pressed="false">Afficher drop lines</button>
+            <?php endif; ?>
+            <?php if ($format !== 'round_robin' && $matches !== []): ?>
+                <button class="btn btn--ghost btn--compact" type="button" data-bracket-zoom="out" title="Zoom out">-</button>
+                <button class="btn btn--ghost btn--compact" type="button" data-bracket-zoom="in" title="Zoom in">+</button>
+                <button class="btn btn--ghost btn--compact" type="button" data-bracket-zoom="reset" title="Zoom 100%">100%</button>
+                <button class="btn btn--ghost btn--compact" type="button" data-bracket-zoom="fit" title="Fit to view">Fit</button>
+                <button class="btn btn--ghost btn--compact" type="button" data-bracket-zoom="center" title="Center">Center</button>
+                <button class="btn btn--ghost btn--compact" type="button" data-bracket-zoom="current" title="Center sur le round en cours">Round</button>
+                <span class="pill pill--soft mono" data-bracket-zoom-label>100%</span>
+                <span class="meta__dot" aria-hidden="true"></span>
+                <button class="btn btn--ghost btn--compact" type="button" data-bracket-export="svg" title="Exporter en SVG">SVG</button>
+                <button class="btn btn--ghost btn--compact" type="button" data-bracket-export="pdf" title="Imprimer / PDF">PDF</button>
             <?php endif; ?>
             <?php if (Auth::isAdmin() && !$isPublicView): ?>
                 <a class="btn btn--ghost" href="/admin/tournaments/<?= $tid ?>">Admin bracket</a>
@@ -872,6 +894,17 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                 <div class="dl__row">
                     <dt>Best-of</dt>
                     <dd>BO<?= (int)($tournament['best_of_default'] ?? 3) ?></dd>
+                </div>
+                <div class="dl__row">
+                    <dt>Finale</dt>
+                    <?php $boFinal = $tournament['best_of_final'] ?? null; ?>
+                    <dd>
+                        <?php if ($boFinal === null): ?>
+                            <span class="muted">defaut</span>
+                        <?php else: ?>
+                            BO<?= (int)$boFinal ?>
+                        <?php endif; ?>
+                    </dd>
                 </div>
                 <div class="dl__row">
                     <dt>Participants</dt>

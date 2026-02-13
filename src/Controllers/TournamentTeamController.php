@@ -12,6 +12,7 @@ use DuelDesk\Repositories\TournamentRepository;
 use DuelDesk\Repositories\TournamentTeamRepository;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
+use DuelDesk\Support\Discord;
 use DuelDesk\Support\Flash;
 
 final class TournamentTeamController
@@ -102,6 +103,16 @@ final class TournamentTeamController
 
         $ttRepo = new TournamentTeamRepository();
         $ttRepo->add($tournamentId, $teamId);
+
+        try {
+            $me = Auth::user();
+            $discordUserId = is_array($me) ? trim((string)($me['discord_user_id'] ?? '')) : '';
+            if ($discordUserId !== '') {
+                Discord::tryAutoRoleOnSignup($discordUserId);
+            }
+        } catch (\Throwable) {
+            // Discord integration is best-effort.
+        }
 
         Flash::set('success', 'Equipe creee. Partage le code pour que tes mates rejoignent.');
         Response::redirect('/tournaments/' . $tournamentId);
@@ -200,6 +211,16 @@ final class TournamentTeamController
         $ttRepo->add($tournamentId, $teamId);
 
         $tmRepo->addMember($teamId, $meId, 'member');
+
+        try {
+            $me = Auth::user();
+            $discordUserId = is_array($me) ? trim((string)($me['discord_user_id'] ?? '')) : '';
+            if ($discordUserId !== '') {
+                Discord::tryAutoRoleOnSignup($discordUserId);
+            }
+        } catch (\Throwable) {
+            // Discord integration is best-effort.
+        }
 
         Flash::set('success', 'Tu as rejoint une equipe.');
         Response::redirect('/tournaments/' . $tournamentId);

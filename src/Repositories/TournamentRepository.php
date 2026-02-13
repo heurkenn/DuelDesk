@@ -29,6 +29,62 @@ final class TournamentRepository
         return $stmt->fetchAll();
     }
 
+    public function countSearch(string $query): int
+    {
+        $query = trim($query);
+        if ($query === '') {
+            return $this->countAll();
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM tournaments WHERE name LIKE ? OR game LIKE ? OR slug LIKE ?'
+        );
+        $v = '%' . $query . '%';
+        $stmt->execute([$v, $v, $v]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function searchPaged(string $query, int $page, int $perPage): array
+    {
+        $query = trim($query);
+        if ($page <= 0) {
+            $page = 1;
+        }
+        if ($perPage <= 0) {
+            $perPage = 20;
+        }
+        if ($perPage > 100) {
+            $perPage = 100;
+        }
+
+        $offset = ($page - 1) * $perPage;
+
+        $sql = 'SELECT t.*, g.image_path AS game_image_path'
+            . ' FROM tournaments t'
+            . ' LEFT JOIN games g ON g.id = t.game_id';
+
+        $params = [];
+        if ($query !== '') {
+            $sql .= ' WHERE t.name LIKE :q1 OR t.game LIKE :q2 OR t.slug LIKE :q3';
+            $v = '%' . $query . '%';
+            $params = ['q1' => $v, 'q2' => $v, 'q3' => $v];
+        }
+
+        $sql .= ' ORDER BY t.created_at DESC LIMIT :limit OFFSET :offset';
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $k => $v) {
+            $stmt->bindValue(':' . $k, $v, PDO::PARAM_STR);
+        }
+        $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        /** @var list<array<string, mixed>> */
+        return $stmt->fetchAll();
+    }
+
     /** @return array<string, mixed>|null */
     public function findById(int $id): ?array
     {
@@ -97,12 +153,13 @@ final class TournamentRepository
         ?string $startsAt,
         ?int $maxEntrants = null,
         ?string $signupClosesAt = null,
-        int $bestOfDefault = 3
+        int $bestOfDefault = 3,
+        ?int $bestOfFinal = null
     ): int
     {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO tournaments (owner_user_id, game_id, name, slug, game, format, participant_type, team_size, status, starts_at, max_entrants, signup_closes_at, best_of_default)'
-            . ' VALUES (:owner_user_id, :game_id, :name, :slug, :game, :format, :participant_type, :team_size, :status, :starts_at, :max_entrants, :signup_closes_at, :best_of_default)'
+            'INSERT INTO tournaments (owner_user_id, game_id, name, slug, game, format, participant_type, team_size, status, starts_at, max_entrants, signup_closes_at, best_of_default, best_of_final)'
+            . ' VALUES (:owner_user_id, :game_id, :name, :slug, :game, :format, :participant_type, :team_size, :status, :starts_at, :max_entrants, :signup_closes_at, :best_of_default, :best_of_final)'
         );
 
         $slug = $this->uniqueSlug($name);
@@ -121,16 +178,17 @@ final class TournamentRepository
             'max_entrants' => $maxEntrants,
             'signup_closes_at' => $signupClosesAt,
             'best_of_default' => $bestOfDefault,
+            'best_of_final' => $bestOfFinal,
         ]);
 
         return (int)$this->pdo->lastInsertId();
     }
 
-    public function updateSettings(int $tournamentId, string $status, ?string $startsAt, ?int $maxEntrants = null, ?string $signupClosesAt = null, int $bestOfDefault = 3): void
+    public function updateSettings(int $tournamentId, string $status, ?string $startsAt, ?int $maxEntrants = null, ?string $signupClosesAt = null, int $bestOfDefault = 3, ?int $bestOfFinal = null): void
     {
         $stmt = $this->pdo->prepare(
             'UPDATE tournaments'
-            . ' SET status = :status, starts_at = :starts_at, max_entrants = :max_entrants, signup_closes_at = :signup_closes_at, best_of_default = :best_of_default'
+            . ' SET status = :status, starts_at = :starts_at, max_entrants = :max_entrants, signup_closes_at = :signup_closes_at, best_of_default = :best_of_default, best_of_final = :best_of_final'
             . ' WHERE id = :id'
         );
         $stmt->execute([
@@ -139,8 +197,41 @@ final class TournamentRepository
             'max_entrants' => $maxEntrants,
             'signup_closes_at' => $signupClosesAt,
             'best_of_default' => $bestOfDefault,
+            'best_of_final' => $bestOfFinal,
             'id' => $tournamentId,
         ]);
+    }
+
+    public function updateConfig(
+        int $tournamentId,
+        string $name,
+        int $gameId,
+        string $gameName,
+        string $format,
+        string $participantType,
+        ?int $teamSize
+    ): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE tournaments'
+            . ' SET name = :name, game_id = :game_id, game = :game, format = :format, participant_type = :participant_type, team_size = :team_size'
+            . ' WHERE id = :id'
+        );
+        $stmt->execute([
+            'name' => $name,
+            'game_id' => $gameId,
+            'game' => $gameName,
+            'format' => $format,
+            'participant_type' => $participantType,
+            'team_size' => $teamSize,
+            'id' => $tournamentId,
+        ]);
+    }
+
+    public function delete(int $tournamentId): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM tournaments WHERE id = :id');
+        $stmt->execute(['id' => $tournamentId]);
     }
 
     public function uniqueSlug(string $name): string

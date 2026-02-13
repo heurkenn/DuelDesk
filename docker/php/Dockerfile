@@ -1,8 +1,19 @@
 FROM php:8.3-fpm-alpine
 
 RUN set -eux; \
+    apk add --no-cache \
+      freetype \
+      libjpeg-turbo \
+      libpng; \
+    apk add --no-cache --virtual .build-deps \
+      freetype-dev \
+      libjpeg-turbo-dev \
+      libpng-dev; \
+    docker-php-ext-configure gd --with-freetype --with-jpeg; \
     docker-php-ext-install -j"$(nproc)" pdo_mysql; \
-    docker-php-ext-enable opcache
+    docker-php-ext-install -j"$(nproc)" gd; \
+    docker-php-ext-enable opcache; \
+    apk del .build-deps
 
 COPY php.ini /usr/local/etc/php/conf.d/zz-dueldesk.ini
 COPY entrypoint.sh /entrypoint.sh

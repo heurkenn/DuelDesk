@@ -26,6 +26,12 @@ $reportedWinnerSlot = $match['reported_winner_slot'] ?? null;
 $reportedAt = is_string($match['reported_at'] ?? null) ? (string)$match['reported_at'] : '';
 $reportedByUsername = (string)($match['reported_by_username'] ?? '');
 
+$counterScore1 = $match['counter_reported_score1'] ?? null;
+$counterScore2 = $match['counter_reported_score2'] ?? null;
+$counterWinnerSlot = $match['counter_reported_winner_slot'] ?? null;
+$counterAt = is_string($match['counter_reported_at'] ?? null) ? (string)$match['counter_reported_at'] : '';
+$counterByUsername = (string)($match['counter_reported_by_username'] ?? '');
+
 if ($participantType === 'team') {
     $aId = $match['team1_id'] !== null ? (int)$match['team1_id'] : null;
     $bId = $match['team2_id'] !== null ? (int)$match['team2_id'] : null;
@@ -70,14 +76,39 @@ $score2 = (int)($match['score2'] ?? 0);
 $scoreText = $status === 'confirmed' ? ($score1 . ' - ' . $score2) : 'TBD';
 $who = $participantType === 'team' ? 'Equipe' : 'Joueur';
 
-$hasReport = $status === 'reported'
+$hasReportA = in_array($status, ['reported', 'disputed'], true)
     && $reportedScore1 !== null
     && $reportedScore2 !== null
     && $reportedWinnerSlot !== null;
 
-$reportScore1 = $hasReport ? (int)$reportedScore1 : $score1;
-$reportScore2 = $hasReport ? (int)$reportedScore2 : $score2;
-$reportWinnerSlot = $hasReport ? (string)(int)$reportedWinnerSlot : '';
+$hasReportB = $status === 'disputed'
+    && $counterScore1 !== null
+    && $counterScore2 !== null
+    && $counterWinnerSlot !== null;
+
+$me = Auth::user();
+$meUsername = is_array($me) ? (string)($me['username'] ?? '') : '';
+$meIsA = ($meUsername !== '' && $reportedByUsername !== '' && $meUsername === $reportedByUsername);
+$meIsB = ($meUsername !== '' && $counterByUsername !== '' && $meUsername === $counterByUsername);
+
+// Prefill: your own report if available, otherwise show existing report A (useful as a starting point).
+$reportScore1 = $score1;
+$reportScore2 = $score2;
+$reportWinnerSlot = '';
+
+if ($meIsB && $hasReportB) {
+    $reportScore1 = (int)$counterScore1;
+    $reportScore2 = (int)$counterScore2;
+    $reportWinnerSlot = (string)(int)$counterWinnerSlot;
+} elseif ($meIsA && $hasReportA) {
+    $reportScore1 = (int)$reportedScore1;
+    $reportScore2 = (int)$reportedScore2;
+    $reportWinnerSlot = (string)(int)$reportedWinnerSlot;
+} elseif ($hasReportA) {
+    $reportScore1 = (int)$reportedScore1;
+    $reportScore2 = (int)$reportedScore2;
+    $reportWinnerSlot = (string)(int)$reportedWinnerSlot;
+}
 
 $matchComplete = $aId !== null && $bId !== null;
 ?>
@@ -145,7 +176,7 @@ $matchComplete = $aId !== null && $bId !== null;
     </div>
 </section>
 
-<?php if ($hasReport): ?>
+<?php if ($status === 'reported' && $hasReportA): ?>
     <section class="card" style="margin-top: 16px;">
         <div class="card__header">
             <div>
@@ -173,6 +204,59 @@ $matchComplete = $aId !== null && $bId !== null;
                 <div class="muted">
                     L'admin doit confirmer ce score dans le dashboard.
                 </div>
+            </div>
+        </div>
+    </section>
+<?php endif; ?>
+
+<?php if ($status === 'disputed' && $hasReportA && $hasReportB): ?>
+    <section class="card" style="margin-top: 16px;">
+        <div class="card__header">
+            <div>
+                <h2 class="card__title">Litige sur le score</h2>
+                <p class="card__subtitle">Deux reports differents ont ete soumis (validation admin requise)</p>
+            </div>
+            <div class="pill">disputed</div>
+        </div>
+        <div class="card__body">
+            <div class="split">
+                <div class="card card--nested">
+                    <div class="card__header">
+                        <h3 class="card__title">Report A</h3>
+                        <?php if ($reportedByUsername !== ''): ?><span class="pill pill--soft"><?= View::e($reportedByUsername) ?></span><?php endif; ?>
+                    </div>
+                    <div class="card__body">
+                        <div class="table__strong"><?= (int)$reportedScore1 ?> - <?= (int)$reportedScore2 ?></div>
+                        <div class="muted" style="margin-top: 6px;">
+                            Winner: <?= ((string)(int)$reportedWinnerSlot) === '1' ? 'A' : 'B' ?>
+                            <?php if ($reportedAt !== ''): ?>
+                                <span class="meta__dot" aria-hidden="true"></span>
+                                <?= View::e(substr($reportedAt, 0, 16) . ' UTC') ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card card--nested">
+                    <div class="card__header">
+                        <h3 class="card__title">Report B</h3>
+                        <?php if ($counterByUsername !== ''): ?><span class="pill pill--soft"><?= View::e($counterByUsername) ?></span><?php endif; ?>
+                    </div>
+                    <div class="card__body">
+                        <div class="table__strong"><?= (int)$counterScore1 ?> - <?= (int)$counterScore2 ?></div>
+                        <div class="muted" style="margin-top: 6px;">
+                            Winner: <?= ((string)(int)$counterWinnerSlot) === '1' ? 'A' : 'B' ?>
+                            <?php if ($counterAt !== ''): ?>
+                                <span class="meta__dot" aria-hidden="true"></span>
+                                <?= View::e(substr($counterAt, 0, 16) . ' UTC') ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="muted" style="margin-top: 12px;">
+                L'admin doit confirmer la bonne version dans le dashboard.
             </div>
         </div>
     </section>

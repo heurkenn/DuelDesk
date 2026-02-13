@@ -19,14 +19,21 @@ final class AdminGameController
         Auth::requireAdmin();
 
         $repo = new GameRepository();
+        $query = trim((string)($_GET['q'] ?? ''));
+        $sort = trim((string)($_GET['sort'] ?? 'name'));
+        if (!in_array($sort, ['name', 'newest'], true)) {
+            $sort = 'name';
+        }
 
         View::render('admin/games', [
             'title' => 'Jeux | Admin | DuelDesk',
-            'games' => $repo->all(),
+            'games' => $repo->search($query, $sort),
             'old' => ['name' => ''],
             'errors' => [],
             'csrfToken' => Csrf::token(),
             'imageReq' => $this->imageRequirements(),
+            'query' => $query,
+            'sort' => $sort,
         ]);
     }
 
@@ -71,6 +78,8 @@ final class AdminGameController
                 'errors' => $errors,
                 'csrfToken' => Csrf::token(),
                 'imageReq' => $req,
+                'query' => '',
+                'sort' => 'name',
             ]);
             return;
         }
@@ -86,14 +95,24 @@ final class AdminGameController
         $absPath = $absDir . '/' . $filename;
         $tmpPath = (string)($imageMeta['tmp_name'] ?? '');
 
-        if ($tmpPath === '' || !is_uploaded_file($tmpPath) || !@move_uploaded_file($tmpPath, $absPath)) {
+        if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+            Response::badRequest('Upload: echec.');
+        }
+
+        $tmpOut = $absPath . '.tmp-' . bin2hex(random_bytes(4));
+        if (!$this->writeCroppedPng($tmpPath, $tmpOut, $req['width'], $req['height'])) {
+            @unlink($tmpOut);
+            Response::badRequest('Upload: traitement image impossible.');
+        }
+        if (!@rename($tmpOut, $absPath)) {
+            @unlink($tmpOut);
             Response::badRequest('Upload: echec.');
         }
 
         @chmod($absPath, 0644);
 
         $imagePath = '/uploads/games/' . $filename;
-        $repo->create($name, $slug, $imagePath, (int)$imageMeta['width'], (int)$imageMeta['height'], (string)$imageMeta['mime']);
+        $repo->create($name, $slug, $imagePath, (int)$req['width'], (int)$req['height'], (string)$req['mime']);
 
         Flash::set('success', 'Jeu ajoute.');
         Response::redirect('/admin/games');
@@ -204,11 +223,22 @@ final class AdminGameController
             }
 
             $tmpPath = (string)($imageMeta['tmp_name'] ?? '');
-            if ($tmpPath === '' || !is_uploaded_file($tmpPath) || !@move_uploaded_file($tmpPath, $absPath)) {
+            if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+                Response::badRequest('Upload: echec.');
+            }
+
+            $tmpOut = $absPath . '.tmp-' . bin2hex(random_bytes(4));
+            if (!$this->writeCroppedPng($tmpPath, $tmpOut, $req['width'], $req['height'])) {
+                @unlink($tmpOut);
+                Response::badRequest('Upload: traitement image impossible.');
+            }
+            if (!@rename($tmpOut, $absPath)) {
+                @unlink($tmpOut);
                 Response::badRequest('Upload: echec.');
             }
 
             @chmod($absPath, 0644);
+            $repo->updateImageMeta($id, (int)$req['width'], (int)$req['height'], (string)$req['mime']);
         }
 
         Flash::set('success', 'Jeu mis a jour.');
@@ -269,7 +299,7 @@ final class AdminGameController
             'height' => $h,
             'mime' => 'image/png',
             'ext' => '.png',
-            'label' => "PNG {$w}x{$h}",
+            'label' => "PNG (auto resize/crop -> {$w}x{$h})",
         ];
     }
 
@@ -289,8 +319,8 @@ final class AdminGameController
         }
 
         $size = (int)($file['size'] ?? 0);
-        if ($size <= 0 || $size > 3 * 1024 * 1024) {
-            return ['ok' => false, 'error' => 'Image trop lourde (max 3MB).'];
+        if ($size <= 0 || $size > 6 * 1024 * 1024) {
+            return ['ok' => false, 'error' => 'Image trop lourde (max 6MB).'];
         }
 
         $tmp = (string)($file['tmp_name'] ?? '');
@@ -311,11 +341,68 @@ final class AdminGameController
             return ['ok' => false, 'error' => "Format requis: {$mime}."];
         }
 
-        if ($iw !== $w || $ih !== $h) {
-            return ['ok' => false, 'error' => "Taille requise: {$w}x{$h}."];
+        return ['ok' => true, 'tmp_name' => $tmp, 'mime' => $im, 'width' => $iw, 'height' => $ih];
+    }
+
+    private function writeCroppedPng(string $srcPath, string $destPath, int $targetW, int $targetH): bool
+    {
+        if (!function_exists('imagecreatefrompng')) {
+            return false;
         }
 
-        return ['ok' => true, 'tmp_name' => $tmp, 'mime' => $im, 'width' => $iw, 'height' => $ih];
+        $src = @imagecreatefrompng($srcPath);
+        if (!$src) {
+            return false;
+        }
+
+        $sw = (int)imagesx($src);
+        $sh = (int)imagesy($src);
+        if ($sw <= 0 || $sh <= 0) {
+            imagedestroy($src);
+            return false;
+        }
+
+        $srcAspect = $sw / $sh;
+        $dstAspect = $targetW / $targetH;
+
+        if ($srcAspect > $dstAspect) {
+            // Source is wider: crop width.
+            $cropH = $sh;
+            $cropW = (int)round($sh * $dstAspect);
+            $cropX = (int)floor(($sw - $cropW) / 2);
+            $cropY = 0;
+        } else {
+            // Source is taller: crop height.
+            $cropW = $sw;
+            $cropH = (int)round($sw / $dstAspect);
+            $cropX = 0;
+            $cropY = (int)floor(($sh - $cropH) / 2);
+        }
+
+        $dst = imagecreatetruecolor($targetW, $targetH);
+        if (!$dst) {
+            imagedestroy($src);
+            return false;
+        }
+
+        // Preserve alpha channel.
+        imagealphablending($dst, false);
+        imagesavealpha($dst, true);
+        $transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+        imagefilledrectangle($dst, 0, 0, $targetW, $targetH, $transparent);
+
+        $ok = imagecopyresampled($dst, $src, 0, 0, $cropX, $cropY, $targetW, $targetH, $cropW, $cropH);
+        if (!$ok) {
+            imagedestroy($dst);
+            imagedestroy($src);
+            return false;
+        }
+
+        $ok = imagepng($dst, $destPath, 6);
+        imagedestroy($dst);
+        imagedestroy($src);
+
+        return (bool)$ok;
     }
 
     private function strlenSafe(string $value): int

@@ -6,6 +6,21 @@ use DuelDesk\View;
 use DuelDesk\Support\Auth;
 
 /** @var list<array<string, mixed>> $tournaments */
+/** @var string $query */
+/** @var int $page */
+/** @var int $pages */
+/** @var int $total */
+
+function tournaments_page_link(int $page, string $query): string
+{
+    $params = ['page' => max(1, $page)];
+    $q = trim($query);
+    if ($q !== '') {
+        $params['q'] = $q;
+    }
+
+    return '/tournaments?' . http_build_query($params);
+}
 ?>
 
 <div class="pagehead">
@@ -13,7 +28,14 @@ use DuelDesk\Support\Auth;
         <h1 class="pagehead__title">Tournois</h1>
         <p class="pagehead__lead">Liste des tournois suivis sur DuelDesk.</p>
     </div>
-    <div>
+    <div class="pagehead__actions">
+        <form method="get" action="/tournaments" class="inline">
+            <input class="input input--compact" type="search" name="q" value="<?= View::e($query) ?>" placeholder="Rechercher..." maxlength="120">
+            <button class="btn btn--ghost btn--compact" type="submit">OK</button>
+            <?php if (trim($query) !== ''): ?>
+                <a class="btn btn--ghost btn--compact" href="/tournaments">Reset</a>
+            <?php endif; ?>
+        </form>
         <?php if (Auth::isAdmin()): ?>
             <a class="btn btn--primary" href="/tournaments/new">Nouveau</a>
         <?php else: ?>
@@ -59,4 +81,18 @@ use DuelDesk\Support\Auth;
             </tbody>
         </table>
     </div>
+
+    <?php if ($pages > 1): ?>
+        <div class="inline" style="margin-top: 12px; justify-content: space-between; width: 100%;">
+            <span class="muted">Page <?= (int)$page ?> / <?= (int)$pages ?> (<?= (int)$total ?> total)</span>
+            <div class="inline">
+                <?php if ($page > 1): ?>
+                    <a class="btn btn--ghost btn--compact" href="<?= View::e(tournaments_page_link($page - 1, $query)) ?>">Prev</a>
+                <?php endif; ?>
+                <?php if ($page < $pages): ?>
+                    <a class="btn btn--ghost btn--compact" href="<?= View::e(tournaments_page_link($page + 1, $query)) ?>">Next</a>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
 <?php endif; ?>

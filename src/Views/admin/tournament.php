@@ -8,22 +8,28 @@ use DuelDesk\View;
 /** @var list<array<string, mixed>> $players */
 /** @var list<array<string, mixed>> $teams */
 /** @var array<int, list<array{user_id:int,username:string,role:string}>> $teamMembers */
+/** @var list<array<string, mixed>> $games */
 /** @var string $csrfToken */
 /** @var string $startsAtValue */
 /** @var string $maxEntrantsValue */
 /** @var string $signupClosesValue */
 /** @var string $bestOfDefaultValue */
+/** @var string $bestOfFinalValue */
 /** @var int $matchCount */
+/** @var int $confirmedCount */
 /** @var bool $canGenerateBracket */
 /** @var list<string> $incompleteTeams */
 /** @var list<array<string, mixed>> $matches */
+/** @var list<array<string, mixed>> $auditLogs */
 
 $tid = (int)($tournament['id'] ?? 0);
+$gameId = (int)($tournament['game_id'] ?? 0);
 $participantType = (string)($tournament['participant_type'] ?? 'solo');
 $teamSize = (int)($tournament['team_size'] ?? 0);
 $status = (string)($tournament['status'] ?? 'draft');
 $isOpen = in_array($status, ['published', 'running'], true);
 $format = (string)($tournament['format'] ?? 'single_elim');
+$canEditStructure = (int)$confirmedCount === 0;
 
 /**
  * @param list<array{user_id:int,username:string,role:string}> $members
@@ -83,67 +89,155 @@ function to_datetime_local_admin(mixed $dbValue): string
     </div>
     <div class="pagehead__actions">
         <a class="btn btn--ghost" href="/tournaments/<?= $tid ?>">Voir la page</a>
+        <form method="post" action="/admin/tournaments/<?= $tid ?>/delete" class="inline" data-confirm="Supprimer ce tournoi ? (action irreversible)">
+            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+            <button class="btn btn--danger" type="submit">Supprimer</button>
+        </form>
         <a class="btn btn--ghost" href="/admin">Retour admin</a>
     </div>
-	</div>
+</div>
 
-	<div class="split">
-	    <section class="card">
-        <div class="card__header">
-            <div>
-                <h2 class="card__title">Parametres</h2>
-                <p class="card__subtitle">Les inscriptions sont ouvertes en <span class="mono">published</span> / <span class="mono">running</span>.</p>
-            </div>
-        </div>
-
-        <form class="card__body form" method="post" action="/admin/tournaments/<?= $tid ?>/settings" novalidate>
-            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
-
-            <div class="form__grid">
-                <label class="field">
-                    <span class="field__label">Statut</span>
-                    <select class="select" name="status">
-                        <option value="draft" <?= $status === 'draft' ? 'selected' : '' ?>>draft</option>
-                        <option value="published" <?= $status === 'published' ? 'selected' : '' ?>>published</option>
-                        <option value="running" <?= $status === 'running' ? 'selected' : '' ?>>running</option>
-                        <option value="completed" <?= $status === 'completed' ? 'selected' : '' ?>>completed</option>
-                    </select>
-                </label>
-
-                <label class="field">
-                    <span class="field__label">Debut (optionnel)</span>
-                    <input class="input" type="datetime-local" name="starts_at" value="<?= View::e($startsAtValue) ?>">
-                    <span class="muted">UTC.</span>
-                </label>
-
-                <label class="field">
-                    <span class="field__label">Max entrants (optionnel)</span>
-                    <input class="input" type="number" name="max_entrants" min="2" max="1024" step="1" inputmode="numeric" value="<?= View::e($maxEntrantsValue) ?>" placeholder="-">
-                </label>
-
-                <label class="field">
-                    <span class="field__label">Best-of (defaut)</span>
-                    <select class="select" name="best_of_default">
-                        <?php foreach (['1', '3', '5', '7', '9'] as $bo): ?>
-                            <option value="<?= View::e($bo) ?>" <?= $bestOfDefaultValue === $bo ? 'selected' : '' ?>>BO<?= View::e($bo) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-
-                <label class="field">
-                    <span class="field__label">Fermeture inscriptions (optionnel)</span>
-                    <input class="input" type="datetime-local" name="signup_closes_at" value="<?= View::e($signupClosesValue) ?>">
-                    <span class="muted">UTC.</span>
-                </label>
+<div class="split">
+    <div class="stack">
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">Configuration</h2>
+                    <p class="card__subtitle">
+                        Nom, jeu, format, participants.
+                        <?php if ($confirmedCount > 0): ?>
+                            <span class="pill pill--soft">verrouille (match(s) confirmes)</span>
+                        <?php else: ?>
+                            <span class="pill">editable</span>
+                        <?php endif; ?>
+                    </p>
+                </div>
             </div>
 
-            <div class="card__footer">
-                <button class="btn btn--primary" type="submit">Enregistrer</button>
-            </div>
-        </form>
-	    </section>
+            <form class="card__body form" method="post" action="/admin/tournaments/<?= $tid ?>/config" novalidate <?= ($matchCount > 0 && $confirmedCount === 0) ? 'data-confirm="Changer format/type/taille reset le bracket. Continuer ?"' : '' ?>>
+                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
 
-	    <section class="card">
+                <div class="form__grid">
+                    <label class="field field--full">
+                        <span class="field__label">Nom du tournoi</span>
+                        <input class="input" name="name" value="<?= View::e((string)($tournament['name'] ?? '')) ?>" required maxlength="120">
+                    </label>
+
+                    <label class="field field--full">
+                        <span class="field__label">Jeu</span>
+                        <select class="select" name="game_id" required>
+                            <?php foreach ($games as $g): ?>
+                                <?php $gid = (int)($g['id'] ?? 0); ?>
+                                <option value="<?= (int)$gid ?>" <?= $gid === $gameId ? 'selected' : '' ?>><?= View::e((string)($g['name'] ?? '')) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span class="field__label">Format</span>
+                        <select class="select" name="format" <?= $canEditStructure ? '' : 'disabled' ?>>
+                            <option value="single_elim" <?= $format === 'single_elim' ? 'selected' : '' ?>>single_elim</option>
+                            <option value="double_elim" <?= $format === 'double_elim' ? 'selected' : '' ?>>double_elim</option>
+                            <option value="round_robin" <?= $format === 'round_robin' ? 'selected' : '' ?>>round_robin</option>
+                        </select>
+                        <?php if (!$canEditStructure): ?>
+                            <span class="muted">Verrouille apres confirmation.</span>
+                        <?php endif; ?>
+                    </label>
+
+                    <label class="field">
+                        <span class="field__label">Participants</span>
+                        <select class="select" name="participant_type" <?= $canEditStructure ? '' : 'disabled' ?>>
+                            <option value="solo" <?= $participantType === 'solo' ? 'selected' : '' ?>>solo</option>
+                            <option value="team" <?= $participantType === 'team' ? 'selected' : '' ?>>team</option>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span class="field__label">Taille equipe</span>
+                        <input class="input" type="number" name="team_size" min="2" max="16" step="1" inputmode="numeric" value="<?= (int)($teamSize > 0 ? $teamSize : 2) ?>" <?= ($participantType === 'team' && $canEditStructure) ? '' : 'disabled' ?>>
+                        <span class="muted"><?= $participantType === 'team' ? '2 a 16' : 'N/A (solo)' ?></span>
+                    </label>
+                </div>
+
+                <?php if ($matchCount > 0 && $confirmedCount === 0): ?>
+                    <div class="form__hint">Si tu modifies format/type/taille, le bracket sera reset automatiquement.</div>
+                <?php endif; ?>
+
+                <div class="card__footer">
+                    <button class="btn btn--primary" type="submit">Enregistrer</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">Parametres</h2>
+                    <p class="card__subtitle">Les inscriptions sont ouvertes en <span class="mono">published</span> / <span class="mono">running</span>.</p>
+                </div>
+            </div>
+
+            <form class="card__body form" method="post" action="/admin/tournaments/<?= $tid ?>/settings" novalidate>
+                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+
+                <div class="form__grid">
+                    <label class="field">
+                        <span class="field__label">Statut</span>
+                        <select class="select" name="status">
+                            <option value="draft" <?= $status === 'draft' ? 'selected' : '' ?>>draft</option>
+                            <option value="published" <?= $status === 'published' ? 'selected' : '' ?>>published</option>
+                            <option value="running" <?= $status === 'running' ? 'selected' : '' ?>>running</option>
+                            <option value="completed" <?= $status === 'completed' ? 'selected' : '' ?>>completed</option>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span class="field__label">Debut (optionnel)</span>
+                        <input class="input" type="datetime-local" name="starts_at" value="<?= View::e($startsAtValue) ?>">
+                        <span class="muted">UTC.</span>
+                    </label>
+
+                    <label class="field">
+                        <span class="field__label">Max entrants (optionnel)</span>
+                        <input class="input" type="number" name="max_entrants" min="2" max="1024" step="1" inputmode="numeric" value="<?= View::e($maxEntrantsValue) ?>" placeholder="-">
+                    </label>
+
+                    <label class="field">
+                        <span class="field__label">Best-of (defaut)</span>
+                        <select class="select" name="best_of_default">
+                            <?php foreach (['1', '3', '5', '7', '9'] as $bo): ?>
+                                <option value="<?= View::e($bo) ?>" <?= $bestOfDefaultValue === $bo ? 'selected' : '' ?>>BO<?= View::e($bo) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+
+                    <label class="field">
+                        <span class="field__label">Best-of (finale)</span>
+                        <select class="select" name="best_of_final">
+                            <option value="" <?= $bestOfFinalValue === '' ? 'selected' : '' ?>>Defaut (BO<?= View::e($bestOfDefaultValue) ?>)</option>
+                            <?php foreach (['1', '3', '5', '7', '9'] as $bo): ?>
+                                <option value="<?= View::e($bo) ?>" <?= $bestOfFinalValue === $bo ? 'selected' : '' ?>>BO<?= View::e($bo) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <span class="muted">Override uniquement pour la finale (GF/GF2).</span>
+                    </label>
+
+                    <label class="field">
+                        <span class="field__label">Fermeture inscriptions (optionnel)</span>
+                        <input class="input" type="datetime-local" name="signup_closes_at" value="<?= View::e($signupClosesValue) ?>">
+                        <span class="muted">UTC.</span>
+                    </label>
+                </div>
+
+                <div class="card__footer">
+                    <button class="btn btn--primary" type="submit">Enregistrer</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <section class="card">
 	        <div class="card__header">
 	            <div>
 	                <h2 class="card__title">Bracket</h2>
@@ -177,8 +271,8 @@ function to_datetime_local_admin(mixed $dbValue): string
                     <div class="form__hint">Tip: fixe les seeds avant de generer (sinon ordre par inscription).</div>
                 <?php endif; ?>
 	        </div>
-	    </section>
-	</div>
+    </section>
+</div>
 
 	<section class="section">
 	    <div class="section__header">
@@ -347,6 +441,10 @@ function to_datetime_local_admin(mixed $dbValue): string
                                 $reportedScore2 = $m['reported_score2'] ?? null;
                                 $reportedWinnerSlot = $m['reported_winner_slot'] ?? null;
                                 $reportedByUsername = (string)($m['reported_by_username'] ?? '');
+                                $counterScore1 = $m['counter_reported_score1'] ?? null;
+                                $counterScore2 = $m['counter_reported_score2'] ?? null;
+                                $counterWinnerSlot = $m['counter_reported_winner_slot'] ?? null;
+                                $counterByUsername = (string)($m['counter_reported_by_username'] ?? '');
                                 $scheduledAt = $m['scheduled_at'] ?? null;
                                 $scheduledValue = to_datetime_local_admin($scheduledAt);
 
@@ -370,13 +468,24 @@ function to_datetime_local_admin(mixed $dbValue): string
 
                                 $canReport = ($st !== 'confirmed') && ($aId !== null) && ($bId !== null);
 
-                                $prefScore1 = ($st === 'reported' && $reportedScore1 !== null) ? (int)$reportedScore1 : $score1;
-                                $prefScore2 = ($st === 'reported' && $reportedScore2 !== null) ? (int)$reportedScore2 : $score2;
-                                $prefWinnerSlot = ($st === 'reported' && $reportedWinnerSlot !== null) ? (string)(int)$reportedWinnerSlot : $winnerSlot;
+                                $hasReportA = $reportedScore1 !== null && $reportedScore2 !== null && $reportedWinnerSlot !== null;
+                                $hasReportB = $counterScore1 !== null && $counterScore2 !== null && $counterWinnerSlot !== null;
 
-                                $scoreLabel = ($st === 'reported' && $reportedScore1 !== null && $reportedScore2 !== null)
-                                    ? ((int)$reportedScore1 . ' - ' . (int)$reportedScore2)
-                                    : ($score1 . ' - ' . $score2);
+                                $prefAScore1 = $hasReportA ? (int)$reportedScore1 : $score1;
+                                $prefAScore2 = $hasReportA ? (int)$reportedScore2 : $score2;
+                                $prefAWinnerSlot = $hasReportA ? (string)(int)$reportedWinnerSlot : $winnerSlot;
+
+                                $prefBScore1 = $hasReportB ? (int)$counterScore1 : $score1;
+                                $prefBScore2 = $hasReportB ? (int)$counterScore2 : $score2;
+                                $prefBWinnerSlot = $hasReportB ? (string)(int)$counterWinnerSlot : $winnerSlot;
+
+                                if ($st === 'disputed' && $hasReportA && $hasReportB) {
+                                    $scoreLabel = 'A: ' . (int)$reportedScore1 . '-' . (int)$reportedScore2 . ' / B: ' . (int)$counterScore1 . '-' . (int)$counterScore2;
+                                } elseif ($st === 'reported' && $hasReportA) {
+                                    $scoreLabel = (int)$reportedScore1 . ' - ' . (int)$reportedScore2;
+                                } else {
+                                    $scoreLabel = $score1 . ' - ' . $score2;
+                                }
                             ?>
                             <tr>
                                 <td class="mono"><?= View::e($bracket) ?></td>
@@ -419,7 +528,15 @@ function to_datetime_local_admin(mixed $dbValue): string
                                     <?php if ($st === 'confirmed'): ?>
                                         <span class="pill">confirmed</span>
                                     <?php else: ?>
-                                        <?php if ($st === 'reported'): ?>
+                                        <?php if ($st === 'disputed'): ?>
+                                            <span class="pill">disputed</span>
+                                            <?php if ($reportedByUsername !== '' || $counterByUsername !== ''): ?>
+                                                <span class="muted" style="margin-left: 8px;">
+                                                    <?php if ($reportedByUsername !== ''): ?>A: <?= View::e($reportedByUsername) ?><?php endif; ?>
+                                                    <?php if ($counterByUsername !== ''): ?><?= $reportedByUsername !== '' ? ' · ' : '' ?>B: <?= View::e($counterByUsername) ?><?php endif; ?>
+                                                </span>
+                                            <?php endif; ?>
+                                        <?php elseif ($st === 'reported'): ?>
                                             <span class="pill">reported</span>
                                             <?php if ($reportedByUsername !== ''): ?>
                                                 <span class="muted" style="margin-left: 8px;">par <?= View::e($reportedByUsername) ?></span>
@@ -433,18 +550,45 @@ function to_datetime_local_admin(mixed $dbValue): string
                                     <?php if (!$canReport): ?>
                                         <span class="muted">-</span>
                                     <?php else: ?>
-                                        <form method="post" action="/admin/tournaments/<?= $tid ?>/matches/<?= $mid ?>/report" class="inline">
-                                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
-                                            <input class="input input--xs" type="number" name="score1" min="0" max="99" step="1" inputmode="numeric" value="<?= (int)$prefScore1 ?>">
-                                            <input class="input input--xs" type="number" name="score2" min="0" max="99" step="1" inputmode="numeric" value="<?= (int)$prefScore2 ?>">
-                                            <select class="select select--compact" name="winner_slot" required>
-                                                <option value="" <?= $prefWinnerSlot === '' ? 'selected' : '' ?>>Winner...</option>
-                                                <option value="1" <?= $prefWinnerSlot === '1' ? 'selected' : '' ?>>A</option>
-                                                <option value="2" <?= $prefWinnerSlot === '2' ? 'selected' : '' ?>>B</option>
-                                            </select>
-                                            <button class="btn btn--primary btn--compact" type="submit">Confirmer</button>
-                                        </form>
-                                        <?php if ($st === 'reported'): ?>
+                                        <?php if ($st === 'disputed' && $hasReportA && $hasReportB): ?>
+                                            <form method="post" action="/admin/tournaments/<?= $tid ?>/matches/<?= $mid ?>/report" class="inline">
+                                                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                                                <input class="input input--xs" type="number" name="score1" min="0" max="99" step="1" inputmode="numeric" value="<?= (int)$prefAScore1 ?>">
+                                                <input class="input input--xs" type="number" name="score2" min="0" max="99" step="1" inputmode="numeric" value="<?= (int)$prefAScore2 ?>">
+                                                <select class="select select--compact" name="winner_slot" required>
+                                                    <option value="" <?= $prefAWinnerSlot === '' ? 'selected' : '' ?>>Winner...</option>
+                                                    <option value="1" <?= $prefAWinnerSlot === '1' ? 'selected' : '' ?>>A</option>
+                                                    <option value="2" <?= $prefAWinnerSlot === '2' ? 'selected' : '' ?>>B</option>
+                                                </select>
+                                                <button class="btn btn--primary btn--compact" type="submit">Confirmer A</button>
+                                            </form>
+
+                                            <form method="post" action="/admin/tournaments/<?= $tid ?>/matches/<?= $mid ?>/report" class="inline">
+                                                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                                                <input class="input input--xs" type="number" name="score1" min="0" max="99" step="1" inputmode="numeric" value="<?= (int)$prefBScore1 ?>">
+                                                <input class="input input--xs" type="number" name="score2" min="0" max="99" step="1" inputmode="numeric" value="<?= (int)$prefBScore2 ?>">
+                                                <select class="select select--compact" name="winner_slot" required>
+                                                    <option value="" <?= $prefBWinnerSlot === '' ? 'selected' : '' ?>>Winner...</option>
+                                                    <option value="1" <?= $prefBWinnerSlot === '1' ? 'selected' : '' ?>>A</option>
+                                                    <option value="2" <?= $prefBWinnerSlot === '2' ? 'selected' : '' ?>>B</option>
+                                                </select>
+                                                <button class="btn btn--primary btn--compact" type="submit">Confirmer B</button>
+                                            </form>
+                                        <?php else: ?>
+                                            <form method="post" action="/admin/tournaments/<?= $tid ?>/matches/<?= $mid ?>/report" class="inline">
+                                                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                                                <input class="input input--xs" type="number" name="score1" min="0" max="99" step="1" inputmode="numeric" value="<?= (int)$prefAScore1 ?>">
+                                                <input class="input input--xs" type="number" name="score2" min="0" max="99" step="1" inputmode="numeric" value="<?= (int)$prefAScore2 ?>">
+                                                <select class="select select--compact" name="winner_slot" required>
+                                                    <option value="" <?= $prefAWinnerSlot === '' ? 'selected' : '' ?>>Winner...</option>
+                                                    <option value="1" <?= $prefAWinnerSlot === '1' ? 'selected' : '' ?>>A</option>
+                                                    <option value="2" <?= $prefAWinnerSlot === '2' ? 'selected' : '' ?>>B</option>
+                                                </select>
+                                                <button class="btn btn--primary btn--compact" type="submit">Confirmer</button>
+                                            </form>
+                                        <?php endif; ?>
+
+                                        <?php if (in_array($st, ['reported', 'disputed'], true)): ?>
                                             <form method="post" action="/admin/tournaments/<?= $tid ?>/matches/<?= $mid ?>/report/reject" class="inline" style="margin-left: 6px;">
                                                 <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
                                                 <button class="btn btn--ghost btn--compact" type="submit">Rejeter</button>
@@ -452,6 +596,86 @@ function to_datetime_local_admin(mixed $dbValue): string
                                         <?php endif; ?>
                                     <?php endif; ?>
                                 </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </section>
+
+    <section class="section">
+        <div class="section__header">
+            <h2 class="section__title">Audit</h2>
+            <div class="section__meta">Actions recentes</div>
+        </div>
+
+        <?php if ($auditLogs === []): ?>
+            <div class="empty empty--compact">
+                <div class="empty__title">Aucun log</div>
+                <div class="empty__hint">Les actions admin (bracket, confirmations, etc.) apparaitront ici.</div>
+            </div>
+        <?php else: ?>
+            <div class="tablewrap">
+                <table class="table table--compact">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>User</th>
+                            <th>Action</th>
+                            <th>Cible</th>
+                            <th>Meta</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($auditLogs as $a): ?>
+                            <?php
+                                $when = (string)($a['created_at'] ?? '');
+                                $who = (string)($a['username'] ?? '');
+                                $action = (string)($a['action'] ?? '');
+                                $etype = (string)($a['entity_type'] ?? '');
+                                $eid = $a['entity_id'] !== null ? (int)$a['entity_id'] : 0;
+                                $metaJson = (string)($a['meta_json'] ?? '');
+
+                                $metaLabel = '';
+                                if ($metaJson !== '') {
+                                    $decoded = json_decode($metaJson, true);
+                                    if (is_array($decoded)) {
+                                        $pairs = [];
+                                        foreach (['status', 'score1', 'score2', 'winner_slot', 'bracket', 'round', 'round_pos', 'note'] as $k) {
+                                            if (!array_key_exists($k, $decoded)) {
+                                                continue;
+                                            }
+                                            $v = $decoded[$k];
+                                            if (is_bool($v)) {
+                                                $v = $v ? 'true' : 'false';
+                                            } elseif (is_array($v) || is_object($v)) {
+                                                $v = '[...]';
+                                            }
+                                            $pairs[] = $k . '=' . (string)$v;
+                                        }
+                                        $metaLabel = $pairs !== [] ? implode(', ', $pairs) : substr($metaJson, 0, 160);
+                                    } else {
+                                        $metaLabel = substr($metaJson, 0, 160);
+                                    }
+                                }
+                            ?>
+                            <tr>
+                                <td class="mono"><?= View::e($when) ?></td>
+                                <td><?= View::e($who !== '' ? $who : '-') ?></td>
+                                <td class="mono"><?= View::e($action !== '' ? $action : '-') ?></td>
+                                <td class="mono">
+                                    <?php if ($etype === 'match' && $eid > 0): ?>
+                                        <a href="/tournaments/<?= (int)$tid ?>/matches/<?= (int)$eid ?>">match#<?= (int)$eid ?></a>
+                                    <?php elseif ($etype !== '' && $eid > 0): ?>
+                                        <?= View::e($etype) ?>#<?= (int)$eid ?>
+                                    <?php elseif ($etype !== ''): ?>
+                                        <?= View::e($etype) ?>
+                                    <?php else: ?>
+                                        -
+                                    <?php endif; ?>
+                                </td>
+                                <td class="muted"><?= View::e($metaLabel) ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>

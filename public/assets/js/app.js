@@ -53,6 +53,8 @@
     const matrixRect = matrixEl.getBoundingClientRect();
     const width = Math.max(1, Math.ceil(matrixEl.scrollWidth || matrixRect.width));
     const height = Math.max(1, Math.ceil(matrixEl.scrollHeight || matrixRect.height));
+    const scaleX = (matrixRect.width > 0 && width > 0) ? (matrixRect.width / width) : 1;
+    const scaleY = (matrixRect.height > 0 && height > 0) ? (matrixRect.height / height) : 1;
 
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('width', String(width));
@@ -100,11 +102,11 @@
     const EDGE_PAD = 2; // Avoid lines bleeding under semi-transparent match cards.
     const pt = (el, side) => {
       const r = el.getBoundingClientRect();
-      const x = side === 'right'
+      const xPx = side === 'right'
         ? ((r.right - matrixRect.left) + EDGE_PAD)
         : ((r.left - matrixRect.left) - EDGE_PAD);
-      const y = (r.top - matrixRect.top) + (r.height / 2);
-      return { x, y };
+      const yPx = (r.top - matrixRect.top) + (r.height / 2);
+      return { x: xPx / scaleX, y: yPx / scaleY };
     };
 
     const pathElbow = (from, to, klass, fromKey, toKey) => {
@@ -259,6 +261,177 @@
     }
   };
 
+  const setupBracketZoomPan = () => {
+    const panel = document.querySelector('[data-tpanel="bracket"]');
+    if (!(panel instanceof HTMLElement)) return;
+
+    const matrix = panel.querySelector('.bracketview__matrix');
+    const scroll = panel.querySelector('.bracketview__scroll');
+    if (!(matrix instanceof HTMLElement) || !(scroll instanceof HTMLElement)) return;
+
+    const label = panel.querySelector('[data-bracket-zoom-label]');
+    const btns = Array.from(panel.querySelectorAll('button[data-bracket-zoom]')).filter((b) => b instanceof HTMLButtonElement);
+    if (btns.length === 0) return;
+
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    const MIN_ZOOM = 0.55;
+    const MAX_ZOOM = 1.0;
+    const STEP = 0.1;
+
+    let zoom = 1;
+
+    const apply = (next) => {
+      zoom = clamp(next, MIN_ZOOM, MAX_ZOOM);
+      matrix.style.transformOrigin = '0 0';
+      matrix.style.transform = `scale(${zoom})`;
+
+      if (label instanceof HTMLElement) {
+        label.textContent = `${Math.round(zoom * 100)}%`;
+      }
+
+      if (window.DuelDesk && typeof window.DuelDesk.redrawBrackets === 'function') {
+        window.DuelDesk.redrawBrackets();
+      }
+    };
+
+    const center = () => {
+      const visibleW = scroll.clientWidth / zoom;
+      const visibleH = scroll.clientHeight / zoom;
+      const maxLeft = Math.max(0, (matrix.scrollWidth || 0) - visibleW);
+      const maxTop = Math.max(0, (matrix.scrollHeight || 0) - visibleH);
+      scroll.scrollLeft = clamp(((matrix.scrollWidth - visibleW) / 2), 0, maxLeft);
+      scroll.scrollTop = clamp(((matrix.scrollHeight - visibleH) / 2), 0, maxTop);
+    };
+
+    const centerOnElement = (el) => {
+      if (!(el instanceof HTMLElement)) return;
+
+      const mRect = matrix.getBoundingClientRect();
+      const eRect = el.getBoundingClientRect();
+      if (mRect.width <= 0 || mRect.height <= 0) return;
+
+      const visibleW = scroll.clientWidth / zoom;
+      const visibleH = scroll.clientHeight / zoom;
+      const maxLeft = Math.max(0, (matrix.scrollWidth || 0) - visibleW);
+      const maxTop = Math.max(0, (matrix.scrollHeight || 0) - visibleH);
+
+      const localX = (eRect.left - mRect.left) / zoom;
+      const localY = (eRect.top - mRect.top) / zoom;
+      const centerX = localX + ((eRect.width / zoom) / 2);
+      const centerY = localY + ((eRect.height / zoom) / 2);
+
+      scroll.scrollLeft = clamp(centerX - (visibleW / 2), 0, maxLeft);
+      scroll.scrollTop = clamp(centerY - (visibleH / 2), 0, maxTop);
+    };
+
+    const centerOnCurrent = () => {
+      const cards = Array.from(matrix.querySelectorAll('.matchcard[data-match-id]'));
+      if (cards.length === 0) return;
+
+      const brOrder = { winners: 0, losers: 1, grand: 2 };
+
+      const candidates = cards
+        .filter((el) => el instanceof HTMLElement)
+        .filter((el) => {
+          const st = el.dataset.status || '';
+          if (st === 'confirmed' || st === 'void') return false;
+          const a = el.dataset.aName || '';
+          const b = el.dataset.bName || '';
+          if (a === 'TBD' || b === 'TBD') return false;
+          if (a === 'BYE' || b === 'BYE') return false;
+          return true;
+        })
+        .sort((a, b) => {
+          const ab = a.dataset.bracket || 'winners';
+          const bb = b.dataset.bracket || 'winners';
+          const ao = brOrder[ab] ?? 9;
+          const bo = brOrder[bb] ?? 9;
+          if (ao !== bo) return ao - bo;
+
+          const ar = Number.parseInt(a.dataset.round || '0', 10) || 0;
+          const br = Number.parseInt(b.dataset.round || '0', 10) || 0;
+          if (ar !== br) return ar - br;
+
+          const ap = Number.parseInt(a.dataset.pos || '0', 10) || 0;
+          const bp = Number.parseInt(b.dataset.pos || '0', 10) || 0;
+          return ap - bp;
+        });
+
+      const target = candidates[0] || cards[0];
+      if (target instanceof HTMLElement) centerOnElement(target);
+    };
+
+    const fit = () => {
+      const pad = 24;
+      const w = Math.max(1, scroll.clientWidth - pad);
+      const ratio = w / Math.max(1, matrix.scrollWidth || 1);
+      apply(ratio);
+      center();
+    };
+
+    panel.addEventListener('click', (e) => {
+      const btn = e.target instanceof Element ? e.target.closest('button[data-bracket-zoom]') : null;
+      if (!(btn instanceof HTMLButtonElement)) return;
+      const action = btn.dataset.bracketZoom || '';
+
+      if (action === 'out') apply(zoom - STEP);
+      else if (action === 'in') apply(zoom + STEP);
+      else if (action === 'reset') apply(1);
+      else if (action === 'fit') fit();
+      else if (action === 'center') center();
+      else if (action === 'current') centerOnCurrent();
+    });
+
+    // Drag-to-pan (avoid interfering with match card clicks).
+    let panning = false;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+
+    const isInteractiveTarget = (target) => {
+      if (!(target instanceof Element)) return false;
+      return !!target.closest('a, button, input, select, textarea, .matchcard');
+    };
+
+    scroll.addEventListener('pointerdown', (e) => {
+      if (!(e instanceof PointerEvent)) return;
+      if (e.button !== 0) return;
+      if (isInteractiveTarget(e.target)) return;
+
+      panning = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      startLeft = scroll.scrollLeft;
+      startTop = scroll.scrollTop;
+      scroll.classList.add('is-panning');
+      scroll.setPointerCapture(e.pointerId);
+    });
+
+    scroll.addEventListener('pointermove', (e) => {
+      if (!(e instanceof PointerEvent)) return;
+      if (!panning) return;
+      const dx = (e.clientX - startX) / zoom;
+      const dy = (e.clientY - startY) / zoom;
+      scroll.scrollLeft = startLeft - dx;
+      scroll.scrollTop = startTop - dy;
+    });
+
+    const endPan = (e) => {
+      if (!(e instanceof PointerEvent)) return;
+      if (!panning) return;
+      panning = false;
+      scroll.classList.remove('is-panning');
+      try { scroll.releasePointerCapture(e.pointerId); } catch {}
+    };
+
+    scroll.addEventListener('pointerup', endPan);
+    scroll.addEventListener('pointercancel', endPan);
+
+    // Initial.
+    apply(1);
+  };
+
   const setupTournamentPanels = () => {
     const bar = document.querySelector('[data-tournament-tabs]');
     if (!(bar instanceof HTMLElement)) return;
@@ -408,6 +581,92 @@
     });
   };
 
+  const setupBracketExport = () => {
+    document.addEventListener('click', async (e) => {
+      const btn = e.target instanceof Element ? e.target.closest('[data-bracket-export]') : null;
+      if (!(btn instanceof HTMLButtonElement)) return;
+
+      const action = btn.getAttribute('data-bracket-export') || '';
+
+      const showBracketPanel = () => {
+        const panel = document.querySelector('[data-tpanel="bracket"]');
+        if (!(panel instanceof HTMLElement)) return;
+        if (!panel.hasAttribute('hidden')) return;
+        const tab = document.querySelector('button[data-tab="bracket"]');
+        if (tab instanceof HTMLButtonElement) tab.click();
+      };
+
+      showBracketPanel();
+
+      // Wait a tick so the panel is visible and SVG lines can be drawn correctly.
+      await new Promise((r) => window.requestAnimationFrame(() => r()));
+      if (window.DuelDesk && typeof window.DuelDesk.redrawBrackets === 'function') {
+        window.DuelDesk.redrawBrackets();
+      }
+
+      const panel = document.querySelector('[data-tpanel="bracket"]');
+      if (!(panel instanceof HTMLElement)) return;
+      const matrix = panel.querySelector('.bracketview__matrix');
+      if (!(matrix instanceof HTMLElement)) return;
+
+      const idMatch = (window.location.pathname || '').match(/\/tournaments\/(\d+)/);
+      const tid = idMatch ? idMatch[1] : 'bracket';
+
+      if (action === 'pdf') {
+        // Print-to-PDF via browser.
+        window.setTimeout(() => window.print(), 50);
+        return;
+      }
+
+      if (action !== 'svg') return;
+
+      let css = '';
+      try {
+        const res = await fetch('/assets/css/app.css', { cache: 'force-cache' });
+        if (res.ok) css = await res.text();
+      } catch {}
+
+      const w = Math.max(1, Math.ceil(matrix.scrollWidth || 1));
+      const h = Math.max(1, Math.ceil(matrix.scrollHeight || 1));
+
+      const clone = matrix.cloneNode(true);
+      if (clone instanceof HTMLElement) {
+        clone.style.transform = 'none';
+        clone.style.transformOrigin = '0 0';
+      }
+
+      const extraCss = `
+        .exportRoot{background:#0b1020;color:#e5e7eb;font-family:Oxanium,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+        .exportRoot *{box-sizing:border-box;}
+        .exportRoot .bracketview__scroll{overflow:visible !important; cursor:default !important;}
+        .exportRoot .bracketview{overflow:visible !important;}
+        .exportRoot .bracketlines .line--drop{opacity:0.08;}
+      `;
+
+      const xhtml = `
+        <div xmlns="http://www.w3.org/1999/xhtml" class="exportRoot">
+          <style>${css}\n${extraCss}</style>
+          ${clone instanceof Element ? clone.outerHTML : ''}
+        </div>
+      `;
+
+      const svg = `<?xml version="1.0" encoding="UTF-8"?>\n` +
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+        `<foreignObject x="0" y="0" width="100%" height="100%">${xhtml}</foreignObject>` +
+        `</svg>`;
+
+      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dueldesk-bracket-t${tid}.svg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+    });
+  };
+
   const setupMatchModal = () => {
     const dialog = document.getElementById('matchModal');
     if (!(dialog instanceof HTMLDialogElement)) return;
@@ -476,10 +735,21 @@
       const s2 = card.dataset.score2 || '0';
       const rs1 = card.dataset.reportedScore1 || '';
       const rs2 = card.dataset.reportedScore2 || '';
+      const crs1 = card.dataset.counterReportedScore1 || '';
+      const crs2 = card.dataset.counterReportedScore2 || '';
       const isConfirmed = status === 'confirmed';
       const isReported = status === 'reported';
+      const isDisputed = status === 'disputed';
       if (scoreEl) {
-        scoreEl.textContent = isConfirmed ? `${s1} - ${s2}` : (isReported && rs1 !== '' && rs2 !== '' ? `${rs1} - ${rs2}` : 'TBD');
+        if (isConfirmed) {
+          scoreEl.textContent = `${s1} - ${s2}`;
+        } else if (isDisputed && rs1 !== '' && rs2 !== '' && crs1 !== '' && crs2 !== '') {
+          scoreEl.textContent = `A ${rs1}-${rs2} / B ${crs1}-${crs2}`;
+        } else if (isReported && rs1 !== '' && rs2 !== '') {
+          scoreEl.textContent = `${rs1} - ${rs2}`;
+        } else {
+          scoreEl.textContent = 'TBD';
+        }
       }
 
       if (statusEl) {
@@ -490,6 +760,12 @@
           const at = card.dataset.reportedAt || '';
           if (who) parts.push(`Reporte par: ${who}`);
           if (at) parts.push(`Reporte a: ${at.slice(0, 16)} UTC`);
+        }
+        if (isDisputed) {
+          const aWho = card.dataset.reportedBy || '';
+          const bWho = card.dataset.counterReportedBy || '';
+          if (aWho) parts.push(`A: ${aWho}`);
+          if (bWho) parts.push(`B: ${bWho}`);
         }
         if (status) parts.push(`Statut: ${status}`);
         statusEl.textContent = parts.join(' · ');
@@ -540,6 +816,8 @@
   setupTournamentPanels();
   setupCopyButtons();
   setupBrackets();
+  setupBracketZoomPan();
   setupDropLinesToggle();
+  setupBracketExport();
   setupMatchModal();
 })();

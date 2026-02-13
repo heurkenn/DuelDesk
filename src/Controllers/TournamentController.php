@@ -23,10 +23,24 @@ final class TournamentController
     public function index(array $params = []): void
     {
         $repo = new TournamentRepository();
+        $query = trim((string)($_GET['q'] ?? ''));
+        $pageRaw = trim((string)($_GET['page'] ?? '1'));
+        $page = (ctype_digit($pageRaw) && (int)$pageRaw > 0) ? (int)$pageRaw : 1;
+        $perPage = 20;
+
+        $total = $repo->countSearch($query);
+        $pages = max(1, (int)ceil($total / $perPage));
+        if ($page > $pages) {
+            $page = $pages;
+        }
 
         View::render('tournaments/index', [
             'title' => 'Tournois | DuelDesk',
-            'tournaments' => $repo->all(),
+            'tournaments' => $repo->searchPaged($query, $page, $perPage),
+            'query' => $query,
+            'page' => $page,
+            'pages' => $pages,
+            'total' => $total,
         ]);
     }
 
@@ -51,6 +65,7 @@ final class TournamentController
                 'max_entrants' => '',
                 'signup_closes_at' => '',
                 'best_of_default' => '3',
+                'best_of_final' => '',
                 'status' => 'draft',
                 'starts_at' => '',
             ],
@@ -77,6 +92,7 @@ final class TournamentController
         $maxEntrantsRaw = trim((string)($_POST['max_entrants'] ?? ''));
         $signupClosesAtRaw = (string)($_POST['signup_closes_at'] ?? '');
         $bestOfRaw = trim((string)($_POST['best_of_default'] ?? '3'));
+        $bestOfFinalRaw = trim((string)($_POST['best_of_final'] ?? ''));
         $status = (string)($_POST['status'] ?? 'draft');
         $startsAtRaw = (string)($_POST['starts_at'] ?? '');
 
@@ -89,6 +105,7 @@ final class TournamentController
             'max_entrants' => $maxEntrantsRaw,
             'signup_closes_at' => $signupClosesAtRaw,
             'best_of_default' => $bestOfRaw,
+            'best_of_final' => $bestOfFinalRaw,
             'status' => $status,
             'starts_at' => $startsAtRaw,
         ];
@@ -173,6 +190,19 @@ final class TournamentController
             }
         }
 
+        $bestOfFinal = null;
+        if ($bestOfFinalRaw !== '') {
+            if (!ctype_digit($bestOfFinalRaw)) {
+                $errors['best_of_final'] = 'Best-of finale invalide.';
+            } else {
+                $bestOfFinal = (int)$bestOfFinalRaw;
+                $allowed = [1, 3, 5, 7, 9];
+                if (!in_array($bestOfFinal, $allowed, true)) {
+                    $errors['best_of_final'] = 'Best-of finale invalide (1/3/5/7/9).';
+                }
+            }
+        }
+
         if ($errors !== []) {
             View::render('tournaments/new', [
                 'title' => 'Nouveau tournoi | DuelDesk',
@@ -187,7 +217,7 @@ final class TournamentController
         $gameName = (string)$game['name'];
 
         $repo = new TournamentRepository();
-        $id = $repo->create(Auth::id(), $gameId, $gameName, $name, $format, $participantType, $teamSize, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault);
+        $id = $repo->create(Auth::id(), $gameId, $gameName, $name, $format, $participantType, $teamSize, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault, $bestOfFinal);
 
         Flash::set('success', 'Tournoi cree.');
         Response::redirect('/tournaments/' . $id);
@@ -279,10 +309,14 @@ final class TournamentController
                     }
 
                     $st = (string)($match['status'] ?? 'pending');
-                    $reportedBy = $match['reported_by_user_id'] ?? null;
-                    $reportedById = (is_int($reportedBy) || is_string($reportedBy)) ? (int)$reportedBy : 0;
-                    if ($st === 'reported' && $reportedById > 0 && $reportedById !== $meId) {
-                        $canReport = false;
+                    if ($st === 'disputed') {
+                        $a = $match['reported_by_user_id'] ?? null;
+                        $b = $match['counter_reported_by_user_id'] ?? null;
+                        $a = (is_int($a) || is_string($a)) ? (int)$a : 0;
+                        $b = (is_int($b) || is_string($b)) ? (int)$b : 0;
+                        if ($a > 0 && $b > 0 && $meId !== $a && $meId !== $b) {
+                            $canReport = false;
+                        }
                     }
                 }
             }

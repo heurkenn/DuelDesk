@@ -29,19 +29,42 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 - [x] arrowheads (sens de lecture)
 - [ ] routage plus lisible du winners -> losers (eviter les croisements)
 - [x] toggle "masquer les drop lines" (ou afficher uniquement au hover)
-- [ ] Zoom/pan du bracket (utile sur mobile + gros tournois)
-- [ ] Boutons "fit to view" / "center on current round"
-- [ ] Export image/PDF du bracket
+- [x] Zoom/pan du bracket (utile sur mobile + gros tournois)
+- [x] Boutons "fit to view" / "center on current round"
+- [x] Export image/PDF du bracket
 
 ## Match workflow (reporting)
 
 - [x] Permettre aux joueurs/capitaines de reporter un score (etat `reported`)
 - [x] Validation admin (prefill + confirmer/rejeter) (etat `confirmed`)
-- [ ] Dispute flow: permettre un "counter-report" + statut `disputed` + resolution admin
+- [x] Dispute flow: permettre un "counter-report" + statut `disputed` + resolution admin
 - [ ] Regles BO:
 - [x] verifier qu'un score est coherent (ex: BO3 -> 2 max wins)
-- [ ] gerer les `BYE` proprement dans tous les cas (SE/DE)
-- [ ] Historique des actions (audit log): qui a confirme quoi, quand
+- [x] gerer les `BYE` proprement dans tous les cas (SE/DE)
+- [x] Historique des actions (audit log): qui a confirme quoi, quand
+
+## Rulesets (par jeu)
+
+- [x] Finale: permettre un best-of different (ex: BO5 en finale) configurable a la creation + editable admin
+- [ ] Pick/Ban maps (framework):
+- [ ] stocker un "ruleset" par tournoi (JSON) + l'appliquer par match (surtout en finale)
+- [ ] UI pick/ban sur la page match (avec etat, tour par tour, validation)
+- [ ] generer la liste des maps jouees (PICKs) + map decider (si BO1/BO3/BO5)
+- [ ] liaison optionnelle a un outil externe (ex: MAPBAN.GG) via URL + stockage du lien dans le match
+
+### CS2 (premier ruleset a implementer)
+
+- [ ] Map pool officiel (3.3):
+- [ ] DUST 2
+- [ ] ANCIENT
+- [ ] ANUBIS
+- [ ] INFERNO
+- [ ] MIRAGE
+- [ ] NUKE
+- [ ] TRAIN
+- [ ] Finals: selection des maps via MAPBAN.GG
+- [ ] BO3 pick/ban:
+- [ ] BAN - BAN - PICK - PICK - BAN - BAN
 
 ## Equipes
 
@@ -62,22 +85,22 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 - [ ] `organizer` (par tournoi)
 - [ ] `moderator` (par tournoi)
 - [ ] Tournois:
-- [ ] edit name / game / format / participant_type / team_size (si aucun match confirme)
-- [ ] supprimer un tournoi (avec confirmation)
+- [x] edit name / game / format / participant_type / team_size (si aucun match confirme)
+- [x] supprimer un tournoi (avec confirmation)
 - [ ] Gestion games:
-- [ ] resize/crop auto des images (forcer le format unique)
-- [ ] recherche + tri
+- [x] resize/crop auto des images (forcer le format unique)
+- [x] recherche + tri
 
 ## Performance / UX
 
 - [ ] Tournoi page: optimiser le rendu du bracket pour gros volumes:
 - [ ] limiter box-shadows couteux dans la grille
-- [ ] `contain`/`content-visibility` sur les grosses zones
-- [ ] eviter toute logique JS au scroll
+- [x] `contain`/`content-visibility` sur les grosses zones
+- [x] eviter toute logique JS au scroll
 - [ ] Skeleton loading / placeholders
 - [ ] Pagination / recherche sur:
-- [ ] liste des tournois
-- [ ] admin users
+- [x] liste des tournois
+- [x] admin users
 - [ ] admin matches
 - [ ] Accessibilite:
 - [ ] navigation clavier bracket (focus + highlight)
@@ -85,23 +108,24 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 
 ## Securite
 
-- [ ] Rate limit login / register
+- [x] Rate limit login / register
 - [ ] Politique mot de passe (min, blacklist)
-- [ ] Cookies session: `Secure`, `HttpOnly`, `SameSite`
+- [x] Cookies session: `Secure`, `HttpOnly`, `SameSite`
 - [ ] Upload images:
-- [ ] verifier mime + taille max
-- [ ] re-encoder (png/webp) pour eviter les payloads bizarres
+- [x] verifier mime + taille max
+- [x] re-encoder (png/webp) pour eviter les payloads bizarres
 - [ ] stocker hors webroot + servir via nginx
-- [ ] Pages d'erreur propres (404/500) en prod
+- [x] Pages d'erreur propres (404/500) en prod
 
 ## Discord (idee start.gg-like)
 
-- [ ] Lier un compte a Discord (OAuth2)
-- [ ] Stocker `discord_user_id` sur `users` (plutot que `players`)
+- [x] Lier un compte a Discord (OAuth2)
+- [x] Stocker `discord_user_id` sur `users` (plutot que `players`)
 - [ ] Bot/Integration:
-- [ ] auto-role sur inscription
+- [x] auto-role sur inscription (env bot + `discord_user_id` user)
 - [ ] check-in via bouton/commande
-- [ ] annonces (debut tournoi, next match ping)
+- [x] annonces: webhook "bracket genere" (env `DISCORD_WEBHOOK_URL`)
+- [ ] annonces: ping "next match" / debut tournoi
 - [ ] importer pseudo/avatars (optionnel)
 
 ## DevOps / Deploiement VPS
