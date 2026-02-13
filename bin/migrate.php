@@ -50,6 +50,21 @@ if ($files === false) {
 
 sort($files, SORT_STRING);
 
+$available = array_map('basename', $files);
+$available = is_array($available) ? array_values(array_map('strval', $available)) : [];
+
+// If the DB was created with older "split" migrations that no longer exist on disk, abort.
+// This repo now uses a squashed schema migration (001_schema.sql).
+$missingOnDisk = array_values(array_diff($applied, $available));
+if ($missingOnDisk !== []) {
+    fwrite(STDERR, "Legacy DB detected: schema_migrations contains versions that are not present in database/migrations.\n");
+    fwrite(STDERR, "This project now uses a squashed schema migration (database/migrations/001_schema.sql).\n");
+    fwrite(STDERR, "Fix: wipe your Docker volumes (DB reset) and re-run migrations:\n");
+    fwrite(STDERR, "  bin/dev.sh reset\n");
+    fwrite(STDERR, "  bin/dev.sh up\n");
+    exit(1);
+}
+
 $ran = 0;
 foreach ($files as $file) {
     $version = basename($file);

@@ -25,6 +25,10 @@ $participantType = (string)($tournament['participant_type'] ?? 'solo');
 $teamSize = (int)($tournament['team_size'] ?? 0);
 $format = (string)($tournament['format'] ?? 'single_elim');
 
+$lanEventName = is_string($tournament['lan_event_name'] ?? null) ? trim((string)$tournament['lan_event_name']) : '';
+$lanEventSlug = is_string($tournament['lan_event_slug'] ?? null) ? trim((string)$tournament['lan_event_slug']) : '';
+$lanEventHref = $lanEventSlug !== '' ? ('/lan/' . $lanEventSlug) : '';
+
 $status = (string)($tournament['status'] ?? 'draft');
 $isOpenStatus = in_array($status, ['published', 'running'], true);
 $entrantCount = $participantType === 'team' ? count($teams) : count($players);
@@ -127,6 +131,7 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
     $counterWinnerSlot = $m['counter_reported_winner_slot'] ?? null;
     $counterByUsername = (string)($m['counter_reported_by_username'] ?? '');
     $counterAt = is_string($m['counter_reported_at'] ?? null) ? (string)$m['counter_reported_at'] : '';
+    $pickbanPending = !empty($m['pickban_pending']);
 
     if ($participantType === 'team') {
         $aId = $m['team1_id'] !== null ? (int)$m['team1_id'] : null;
@@ -190,6 +195,7 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
         data-counter-reported-winner-slot="<?= $counterWinnerSlot !== null ? (int)$counterWinnerSlot : '' ?>"
         data-counter-reported-by="<?= View::e($counterByUsername) ?>"
         data-counter-reported-at="<?= View::e($counterAt) ?>"
+        data-pickban-pending="<?= $pickbanPending ? '1' : '' ?>"
         data-a-name="<?= View::e($aLabel) ?>"
         data-b-name="<?= View::e($bLabel) ?>"
         data-score1="<?= (int)$score1 ?>"
@@ -197,6 +203,9 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
         data-winner-slot="<?= (int)$winnerSlot ?>"
         aria-label="<?= View::e("{$tag} {$aLabel} vs {$bLabel}") ?>"
     >
+        <?php if ($pickbanPending): ?>
+            <span class="matchcard__alert" title="Pick/Ban requis" aria-hidden="true">!</span>
+        <?php endif; ?>
         <div class="matchcard__slot<?= $aId === null ? ' is-empty' : '' ?><?= $aWin ? ' is-winner' : '' ?>">
             <span class="matchcard__name"><?= View::e($aLabel) ?></span>
             <span class="matchcard__score"><?= View::e($s1) ?></span>
@@ -211,6 +220,8 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
 }
 ?>
 
+<div data-dd-tournament-live data-tournament-id="<?= (int)($tournament['id'] ?? 0) ?>" hidden></div>
+
 <div class="pagehead">
     <div>
         <h1 class="pagehead__title"><?= View::e((string)($tournament['name'] ?? 'Tournoi')) ?></h1>
@@ -220,6 +231,10 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
             <?php endif; ?>
             <?php $bracketPill = $bracketGenerated ? 'bracket: genere' : 'bracket: en attente'; ?>
             <?= View::e((string)($tournament['game'] ?? '')) ?> · <span class="pill"><?= View::e((string)($tournament['format'] ?? '')) ?></span> <span class="pill pill--soft"><?= View::e((string)($tournament['status'] ?? '')) ?></span> <span class="pill pill--soft"><?= View::e($bracketPill) ?></span>
+            <?php if ($lanEventHref !== '' && $lanEventName !== ''): ?>
+                <span class="meta__dot" aria-hidden="true"></span>
+                <a class="pill pill--soft" href="<?= View::e($lanEventHref) ?>"><?= View::e('LAN: ' . $lanEventName) ?></a>
+            <?php endif; ?>
         </p>
     </div>
     <div class="pagehead__actions">
@@ -886,6 +901,16 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                     <div class="dl__row">
                         <dt>Jeu</dt>
                         <dd><?= View::e((string)$tournament['game']) ?></dd>
+                    </div>
+                    <div class="dl__row">
+                        <dt>LAN</dt>
+                        <dd>
+                            <?php if ($lanEventHref !== '' && $lanEventName !== ''): ?>
+                                <a class="link" href="<?= View::e($lanEventHref) ?>"><?= View::e($lanEventName) ?></a>
+                            <?php else: ?>
+                                <span class="muted">-</span>
+                            <?php endif; ?>
+                        </dd>
                     </div>
                 <div class="dl__row">
                     <dt>Format</dt>

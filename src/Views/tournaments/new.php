@@ -5,7 +5,8 @@ declare(strict_types=1);
 use DuelDesk\View;
 
 /** @var list<array<string, mixed>> $games */
-/** @var array{name:string,game_id:string,format:string,participant_type:string,team_size:string,max_entrants:string,signup_closes_at:string,best_of_default:string,best_of_final:string,status:string,starts_at:string} $old */
+/** @var list<array<string, mixed>> $lanEvents */
+/** @var array{name:string,game_id:string,format:string,participant_type:string,team_size:string,max_entrants:string,signup_closes_at:string,best_of_default:string,best_of_final:string,pickban_start_mode:string,lan_event_id:string,status:string,starts_at:string} $old */
 /** @var array<string,string> $errors */
 /** @var string $csrfToken */
 
@@ -65,6 +66,23 @@ function field_error(array $errors, string $key): ?string
             </label>
 
             <label class="field">
+                <span class="field__label">LAN (optionnel)</span>
+                <select class="select<?= field_error($errors, 'lan_event_id') ? ' input--error' : '' ?>" name="lan_event_id">
+                    <option value="" <?= ($old['lan_event_id'] ?? '') === '' ? 'selected' : '' ?>>Aucun</option>
+                    <?php foreach ($lanEvents as $e): ?>
+                        <?php $eid = (string)($e['id'] ?? ''); ?>
+                        <option value="<?= (int)$eid ?>" <?= $eid !== '' && $eid === (string)($old['lan_event_id'] ?? '') ? 'selected' : '' ?>>
+                            <?= View::e((string)($e['name'] ?? ('LAN #' . $eid))) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <span class="muted">Associe ce tournoi a un evenement LAN.</span>
+                <?php if (field_error($errors, 'lan_event_id')): ?>
+                    <span class="field__error"><?= View::e((string)field_error($errors, 'lan_event_id')) ?></span>
+                <?php endif; ?>
+            </label>
+
+            <label class="field">
                 <span class="field__label">Format</span>
                 <select class="select<?= field_error($errors, 'format') ? ' input--error' : '' ?>" name="format">
                     <option value="single_elim" <?= $old['format'] === 'single_elim' ? 'selected' : '' ?>>Simple elimination</option>
@@ -99,6 +117,18 @@ function field_error(array $errors, string $key): ?string
                 <span class="muted">Override uniquement pour la finale (GF/GF2).</span>
                 <?php if (field_error($errors, 'best_of_final')): ?>
                     <span class="field__error"><?= View::e((string)field_error($errors, 'best_of_final')) ?></span>
+                <?php endif; ?>
+            </label>
+
+            <label class="field">
+                <span class="field__label">Pick/Ban: qui commence</span>
+                <select class="select<?= field_error($errors, 'pickban_start_mode') ? ' input--error' : '' ?>" name="pickban_start_mode">
+                    <option value="coin_toss" <?= ($old['pickban_start_mode'] ?? 'coin_toss') === 'coin_toss' ? 'selected' : '' ?>>Pile ou face</option>
+                    <option value="higher_seed" <?= ($old['pickban_start_mode'] ?? 'coin_toss') === 'higher_seed' ? 'selected' : '' ?>>Higher seed choisit Team A/B</option>
+                </select>
+                <span class="muted">Utilise uniquement si un ruleset Pick/Ban est actif.</span>
+                <?php if (field_error($errors, 'pickban_start_mode')): ?>
+                    <span class="field__error"><?= View::e((string)field_error($errors, 'pickban_start_mode')) ?></span>
                 <?php endif; ?>
             </label>
 

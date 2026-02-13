@@ -9,6 +9,7 @@ use DuelDesk\View;
 /** @var list<array<string, mixed>> $teams */
 /** @var array<int, list<array{user_id:int,username:string,role:string}>> $teamMembers */
 /** @var list<array<string, mixed>> $games */
+/** @var list<array<string, mixed>> $lanEvents */
 /** @var string $csrfToken */
 /** @var string $startsAtValue */
 /** @var string $maxEntrantsValue */
@@ -82,6 +83,12 @@ function to_datetime_local_admin(mixed $dbValue): string
             <span class="table__strong"><?= View::e((string)($tournament['name'] ?? '')) ?></span>
             <span class="meta__dot" aria-hidden="true"></span>
             <?= View::e((string)($tournament['game'] ?? '')) ?>
+            <?php if (!empty($tournament['lan_event_id'])): ?>
+                <span class="meta__dot" aria-hidden="true"></span>
+                <a class="pill pill--soft" href="/admin/lan/<?= (int)$tournament['lan_event_id'] ?>">
+                    LAN: <?= View::e((string)($tournament['lan_event_name'] ?? ('#' . (int)$tournament['lan_event_id']))) ?>
+                </a>
+            <?php endif; ?>
             <span class="meta__dot" aria-hidden="true"></span>
             <span class="pill"><?= View::e((string)($tournament['format'] ?? '')) ?></span>
             <span class="pill pill--soft"><?= View::e($status) ?></span>
@@ -131,6 +138,21 @@ function to_datetime_local_admin(mixed $dbValue): string
                                 <option value="<?= (int)$gid ?>" <?= $gid === $gameId ? 'selected' : '' ?>><?= View::e((string)($g['name'] ?? '')) ?></option>
                             <?php endforeach; ?>
                         </select>
+                    </label>
+
+                    <label class="field field--full">
+                        <span class="field__label">LAN (optionnel)</span>
+                        <?php $lanEventIdValue = $tournament['lan_event_id'] !== null ? (string)(int)$tournament['lan_event_id'] : ''; ?>
+                        <select class="select" name="lan_event_id">
+                            <option value="" <?= $lanEventIdValue === '' ? 'selected' : '' ?>>Aucun</option>
+                            <?php foreach ($lanEvents as $e): ?>
+                                <?php $eid = (string)($e['id'] ?? ''); ?>
+                                <option value="<?= (int)$eid ?>" <?= $eid !== '' && $eid === $lanEventIdValue ? 'selected' : '' ?>>
+                                    <?= View::e((string)($e['name'] ?? ('LAN #' . $eid))) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <span class="muted">Associe ce tournoi a un evenement LAN.</span>
                     </label>
 
                     <label class="field">
@@ -223,10 +245,62 @@ function to_datetime_local_admin(mixed $dbValue): string
                         <span class="muted">Override uniquement pour la finale (GF/GF2).</span>
                     </label>
 
+                    <?php $pickbanStartModeValue = (string)($tournament['pickban_start_mode'] ?? 'coin_toss'); ?>
+                    <label class="field">
+                        <span class="field__label">Pick/Ban: qui commence</span>
+                        <select class="select" name="pickban_start_mode">
+                            <option value="coin_toss" <?= $pickbanStartModeValue === 'coin_toss' ? 'selected' : '' ?>>Pile ou face</option>
+                            <option value="higher_seed" <?= $pickbanStartModeValue === 'higher_seed' ? 'selected' : '' ?>>Higher seed choisit Team A/B</option>
+                        </select>
+                        <span class="muted">Utilise uniquement si un ruleset Pick/Ban est actif.</span>
+                    </label>
+
                     <label class="field">
                         <span class="field__label">Fermeture inscriptions (optionnel)</span>
                         <input class="input" type="datetime-local" name="signup_closes_at" value="<?= View::e($signupClosesValue) ?>">
                         <span class="muted">UTC.</span>
+                    </label>
+                </div>
+
+                <div class="card__footer">
+                    <button class="btn btn--primary" type="submit">Enregistrer</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="card">
+            <div class="card__header">
+                <div>
+                    <h2 class="card__title">Ruleset (Pick/Ban)</h2>
+                    <p class="card__subtitle">Configurer le pick/ban de maps (CS2, Valorant, etc.).</p>
+                </div>
+                <?php $rulesetJsonValue = trim((string)($tournament['ruleset_json'] ?? '')); ?>
+                <div class="pill<?= $rulesetJsonValue !== '' ? '' : ' pill--soft' ?>"><?= $rulesetJsonValue !== '' ? 'actif' : 'inactif' ?></div>
+            </div>
+
+            <form class="card__body form" method="post" action="/admin/tournaments/<?= $tid ?>/ruleset" novalidate>
+                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+
+                <div class="form__grid">
+                    <label class="field field--full">
+                        <span class="field__label">Source</span>
+                        <select class="select" name="ruleset_source">
+                            <?php if ($rulesetJsonValue !== ''): ?>
+                                <option value="keep" selected>Actuel (ne pas changer)</option>
+                            <?php endif; ?>
+                            <option value="none" <?= $rulesetJsonValue === '' ? 'selected' : '' ?>>Aucun</option>
+                            <option value="template:cs2">CS2 (template)</option>
+                            <option value="template:valorant">Valorant (template)</option>
+                            <?php if (!empty($rulesets)): ?>
+                                <optgroup label="Rulesets sauvegardes">
+                                    <?php foreach ($rulesets as $r): ?>
+                                        <?php $rid = (int)($r['id'] ?? 0); $rname = (string)($r['name'] ?? ''); ?>
+                                        <option value="ruleset:<?= (int)$rid ?>"><?= View::e($rname !== '' ? $rname : ('#' . $rid)) ?></option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                            <?php endif; ?>
+                        </select>
+                        <span class="muted">Le ruleset determine les maps + l'ordre pick/ban. Pour en creer: <a class="link" href="/admin/rulesets/new?game_id=<?= (int)($tournament['game_id'] ?? 0) ?>">Nouveau ruleset</a> ou <a class="link" href="/admin/rulesets?game_id=<?= (int)($tournament['game_id'] ?? 0) ?>">liste</a>.</span>
                     </label>
                 </div>
 

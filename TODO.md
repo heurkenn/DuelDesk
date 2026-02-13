@@ -6,14 +6,14 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 
 - [x] Vue publique partageable par lien (slug)
 - [x] Distinction claire "publique" vs "admin" (pas de boutons admin visibles cote public)
-- [ ] Limites inscriptions:
+- [x] Limites inscriptions:
 - [x] `max_entrants` (cap)
 - [x] date/heure de fermeture des inscriptions
 - [x] blocage inscription/retrait quand le bracket est genere (ou bien workflow "void")
-- [ ] Page tournoi:
+- [x] Page tournoi:
 - [x] afficher l'etat "bracket genere" / "en attente"
 - [x] bouton "copier le lien" (share)
-- [ ] Gestion des matchs:
+- [x] Gestion des matchs:
 - [x] statut `scheduled_at` (planification admin)
 - [x] timezone (clarifier UTC vs local, affichage)
 - [x] definir `best_of` (par tournoi)
@@ -38,7 +38,7 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 - [x] Permettre aux joueurs/capitaines de reporter un score (etat `reported`)
 - [x] Validation admin (prefill + confirmer/rejeter) (etat `confirmed`)
 - [x] Dispute flow: permettre un "counter-report" + statut `disputed` + resolution admin
-- [ ] Regles BO:
+- [x] Regles BO:
 - [x] verifier qu'un score est coherent (ex: BO3 -> 2 max wins)
 - [x] gerer les `BYE` proprement dans tous les cas (SE/DE)
 - [x] Historique des actions (audit log): qui a confirme quoi, quand
@@ -46,25 +46,40 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 ## Rulesets (par jeu)
 
 - [x] Finale: permettre un best-of different (ex: BO5 en finale) configurable a la creation + editable admin
-- [ ] Pick/Ban maps (framework):
-- [ ] stocker un "ruleset" par tournoi (JSON) + l'appliquer par match (surtout en finale)
-- [ ] UI pick/ban sur la page match (avec etat, tour par tour, validation)
-- [ ] generer la liste des maps jouees (PICKs) + map decider (si BO1/BO3/BO5)
+- [x] Pick/Ban maps (framework):
+- [x] Admin: CRUD rulesets + builder (pool + sequences) (sans JSON)
+- [x] Templates: CS2 + Valorant
+- [x] stocker un ruleset par tournoi + snapshot par match
+- [x] UI pick/ban sur la page match (ban/pick/decider) + historique
+- [x] Choix du cote (attaque/defense) apres chaque map pick + apres le decider
+- [x] Blocage reporting tant que le pick/ban n'est pas verrouille
+- [x] UX: icone `!` sur les matchs du bracket si pick/ban requis + polling (pas besoin de refresh)
+- [x] Parametre tournoi: `pickban_start_mode` (coin_toss / higher_seed)
 - [ ] liaison optionnelle a un outil externe (ex: MAPBAN.GG) via URL + stockage du lien dans le match
 
 ### CS2 (premier ruleset a implementer)
 
-- [ ] Map pool officiel (3.3):
-- [ ] DUST 2
-- [ ] ANCIENT
-- [ ] ANUBIS
-- [ ] INFERNO
-- [ ] MIRAGE
-- [ ] NUKE
-- [ ] TRAIN
-- [ ] Finals: selection des maps via MAPBAN.GG
-- [ ] BO3 pick/ban:
-- [ ] BAN - BAN - PICK - PICK - BAN - BAN
+- [x] Template CS2: map pool (7 maps)
+- [x] DUST 2
+- [x] ANCIENT
+- [x] ANUBIS
+- [x] INFERNO
+- [x] MIRAGE
+- [x] NUKE
+- [x] TRAIN
+- [x] BO1 pick/ban: A remove 2, B remove 3, A remove 1, decider
+- [x] BO3 pick/ban: BAN - BAN - PICK - PICK - BAN - BAN + decider
+- [x] Side choice: apres chaque pick, l'autre choisit le cote; decider = Team B choisit
+- [ ] Finals: selection des maps via MAPBAN.GG (optionnel)
+
+## LAN (mega-tournois)
+
+- [x] Evenements LAN: pages publiques `/lan` + `/lan/{slug}`
+- [x] Admin LAN: CRUD + rattacher/detacher des tournois
+
+## Infra (dev)
+
+- [x] Migrations DB "squash": `database/migrations/001_schema.sql` + runner `bin/migrate.php` (detecte DB legacy)
 
 ## Equipes
 

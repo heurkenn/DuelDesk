@@ -572,3 +572,82 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - Migration: `database/migrations/015_discord_users.sql`
 - Env: `.env.example`, `docker-compose.yml`
 - `TODO.md`
+
+## Etape 34 - Rulesets: Pick/Ban maps (CS2/Valorant) + blocage reporting
+
+### Ce qui a ete fait
+- Tournois: champ `ruleset_json` pour activer un ruleset "map veto".
+- Tournois: champ `pickban_start_mode` pour definir comment on decide qui est "Team A" (starter):
+- `coin_toss`: pile ou face -> le vainqueur est Team A et commence
+- `higher_seed`: le higher seed choisit d'etre Team A ou Team B
+- Admin: ajout d'un dashboard `Rulesets` (CRUD) pour creer/modifier/supprimer des rulesets sans editer du JSON:
+- `GET /admin/rulesets` (liste + filtre par jeu)
+- `GET /admin/rulesets/new` + `POST /admin/rulesets` (creation)
+- `GET /admin/rulesets/{id}` + `POST /admin/rulesets/{id}` (edition)
+- `POST /admin/rulesets/{id}/delete` (suppression)
+- Builder:
+- choix du jeu
+- pool de maps (key + nom)
+- sequences par BO (BO1/BO3/BO5): ordre ban/pick + acteur (`starter`/`other`/`alternate`) ; decider ajoute automatiquement
+- Admin tournoi: section "Ruleset (Pick/Ban)" simplifiee:
+- selection d'une source (aucun / templates `cs2`/`valorant` / ruleset sauvegarde) sans champ JSON.
+- Match: pick/ban obligatoire avant de reporter le score:
+- pile ou face (le participant qui lance choisit Pile/Face) -> determine Team A/Team B (slots A/B)
+- ou "higher seed" (le higher seed choisit Team A/B)
+- sequence ban/pick par BO (BO1/BO3/BO5) + decider auto
+- Choix du cote (attaque/defense) obligatoire apres chaque map pick + apres le decider:
+- map pick: l'autre slot choisit le cote
+- decider: Team B choisit le cote (process CS2)
+- verrouillage automatique a la fin
+- UI: section Pick/Ban sur la page match + grille de maps + historique.
+- UX:
+- icone `!` sur les matchs du bracket quand le pick/ban n'est pas encore verrouille
+- page match: actions pick/ban/report en AJAX (pas de refresh complet)
+
+### Fichiers touches
+- DB: `database/migrations/001_schema.sql`, `database/migrations/002_rulesets.sql`, `database/migrations/003_pickban_sides.sql`, `database/migrations/004_tournament_pickban_start_mode.sql`
+- Routes: `public/index.php`
+- Controllers: `src/Controllers/PickBanController.php`, `src/Controllers/AdminTournamentController.php`, `src/Controllers/AdminRulesetController.php`, `src/Controllers/TournamentController.php`, `src/Controllers/MatchReportController.php`
+- Service: `src/Services/PickBanEngine.php`
+- Repos: `src/Repositories/PickBanRepository.php`, `src/Repositories/RulesetRepository.php`, `src/Repositories/TournamentRepository.php`
+- Views: `src/Views/admin/tournament.php`, `src/Views/admin/rulesets.php`, `src/Views/admin/ruleset_edit.php`, `src/Views/tournaments/match.php`, `src/Views/tournaments/show.php`
+- CSS: `public/assets/css/app.css`
+- JS: `public/assets/js/app.js`
+
+## Etape 35 - Infra: squash migrations DB
+
+### Ce qui a ete fait
+- Les migrations SQL ont ete "squash" en un schema unique: `database/migrations/001_schema.sql`.
+- Les anciennes migrations incrementales (ALTER TABLE, etc.) ont ete supprimees pour reduire le bruit.
+- `bin/migrate.php` detecte une DB "legacy" (schema_migrations avec versions manquantes) et demande un reset des volumes.
+
+### Fichiers touches
+- Schema: `database/migrations/001_schema.sql`
+- Migrate runner: `bin/migrate.php`
+- Doc: `README.md`
+
+## Etape 36 - LAN: evenements (mega-tournois)
+
+### Ce qui a ete fait
+- Ajout d'un concept "LAN" (evenement) qui regroupe plusieurs tournois.
+- DB:
+- table `lan_events`
+- `tournaments.lan_event_id` (FK `ON DELETE SET NULL`)
+- Public:
+- `GET /lan` (listing des LAN)
+- `GET /lan/{slug}` (page LAN + liste des tournois inclus)
+- Admin:
+- CRUD LAN: `GET /admin/lan`, `GET /admin/lan/new`, `POST /admin/lan`, `GET /admin/lan/{id}`, `POST /admin/lan/{id}`, `POST /admin/lan/{id}/delete`
+- rattacher/detacher un tournoi a un LAN depuis l'admin du LAN
+- Creation tournoi: select "LAN (optionnel)" + preselect via `?lan_event_id=...`
+- UI:
+- navigation "LAN"
+- la page tournoi affiche le LAN associe (pill + lien)
+- correction UX: les listes (home + `/tournaments`) envoient l'admin vers la vue interne `/tournaments/{id}` (la vue publique `/t/{slug}` reste sans boutons admin)
+
+### Fichiers touches
+- Migration: `database/migrations/005_lan_events.sql` (et schema `database/migrations/001_schema.sql`)
+- Routes: `public/index.php`
+- Controllers: `src/Controllers/LanEventController.php`, `src/Controllers/AdminLanEventController.php`, `src/Controllers/TournamentController.php`, `src/Controllers/AdminTournamentController.php`
+- Repos: `src/Repositories/LanEventRepository.php`, `src/Repositories/TournamentRepository.php`
+- Views: `src/Views/lan/index.php`, `src/Views/lan/show.php`, `src/Views/admin/lan_events.php`, `src/Views/admin/lan_event_edit.php`, `src/Views/tournaments/new.php`, `src/Views/tournaments/show.php`, `src/Views/admin/tournament.php`, `src/Views/layout.php`, `src/Views/home.php`, `src/Views/tournaments/index.php`

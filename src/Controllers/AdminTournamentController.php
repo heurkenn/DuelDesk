@@ -8,13 +8,16 @@ use DuelDesk\Database\Db;
 use DuelDesk\Http\Response;
 use DuelDesk\Repositories\AuditLogRepository;
 use DuelDesk\Repositories\GameRepository;
+use DuelDesk\Repositories\LanEventRepository;
 use DuelDesk\Repositories\MatchRepository;
+use DuelDesk\Repositories\RulesetRepository;
 use DuelDesk\Repositories\TeamMemberRepository;
 use DuelDesk\Repositories\TeamRepository;
 use DuelDesk\Repositories\TournamentPlayerRepository;
 use DuelDesk\Repositories\TournamentRepository;
 use DuelDesk\Repositories\TournamentTeamRepository;
 use DuelDesk\Services\BracketGenerator;
+use DuelDesk\Services\PickBanEngine;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
 use DuelDesk\Support\Discord;
@@ -112,6 +115,17 @@ final class AdminTournamentController
         $gRepo = new GameRepository();
         $games = $gRepo->all();
 
+        $lanRepo = new LanEventRepository();
+        $lanEvents = $lanRepo->listForSelect();
+
+        $rulesets = [];
+        $gameId = $t['game_id'] ?? null;
+        $gameId = (is_int($gameId) || is_string($gameId)) ? (int)$gameId : 0;
+        if ($gameId > 0) {
+            $rRepo = new RulesetRepository();
+            $rulesets = $rRepo->listAll($gameId);
+        }
+
         View::render('admin/tournament', [
             'title' => 'Gerer le tournoi | Admin | DuelDesk',
             'tournament' => $t,
@@ -119,6 +133,8 @@ final class AdminTournamentController
             'teams' => $teams,
             'teamMembers' => $teamMembers,
             'games' => $games,
+            'lanEvents' => $lanEvents,
+            'rulesets' => $rulesets,
             'csrfToken' => Csrf::token(),
             'startsAtValue' => $this->toDatetimeLocal($t['starts_at'] ?? null),
             'maxEntrantsValue' => $t['max_entrants'] !== null ? (string)(int)$t['max_entrants'] : '',
@@ -157,6 +173,7 @@ final class AdminTournamentController
 
         $name = trim((string)($_POST['name'] ?? ''));
         $gameId = (int)($_POST['game_id'] ?? 0);
+        $lanEventIdRaw = trim((string)($_POST['lan_event_id'] ?? ($t['lan_event_id'] !== null ? (string)(int)$t['lan_event_id'] : '')));
         // Allow disabled fields in the form: default to existing values.
         $format = (string)($_POST['format'] ?? ($t['format'] ?? 'single_elim'));
         $participantType = (string)($_POST['participant_type'] ?? ($t['participant_type'] ?? 'solo'));
@@ -197,6 +214,24 @@ final class AdminTournamentController
             if ($teamSize < 2 || $teamSize > 16) {
                 Flash::set('error', "Taille d'equipe invalide (2 a 16).");
                 Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+        }
+
+        $lanEventId = null;
+        if ($lanEventIdRaw !== '') {
+            if (!ctype_digit($lanEventIdRaw)) {
+                Flash::set('error', 'LAN invalide.');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+            $lanEventId = (int)$lanEventIdRaw;
+            if ($lanEventId <= 0) {
+                $lanEventId = null;
+            } else {
+                $lanRepo = new LanEventRepository();
+                if ($lanRepo->findById($lanEventId) === null) {
+                    Flash::set('error', 'LAN introuvable.');
+                    Response::redirect('/admin/tournaments/' . $tournamentId);
+                }
             }
         }
 
@@ -256,7 +291,8 @@ final class AdminTournamentController
             (string)$game['name'],
             $format,
             $participantType,
-            $teamSize
+            $teamSize,
+            $lanEventId
         );
 
         $this->audit($tournamentId, 'tournament.config.update', 'tournament', $tournamentId, [
@@ -265,6 +301,7 @@ final class AdminTournamentController
             'format' => $format,
             'participant_type' => $participantType,
             'team_size' => $teamSize,
+            'lan_event_id' => $lanEventId,
             'bracket_reset' => $didReset,
         ]);
 
@@ -293,6 +330,7 @@ final class AdminTournamentController
         $signupClosesAtRaw = (string)($_POST['signup_closes_at'] ?? '');
         $bestOfRaw = trim((string)($_POST['best_of_default'] ?? '3'));
         $bestOfFinalRaw = trim((string)($_POST['best_of_final'] ?? ''));
+        $pickbanStartMode = trim((string)($_POST['pickban_start_mode'] ?? 'coin_toss'));
 
         $statuses = ['draft', 'published', 'running', 'completed'];
         if (!in_array($status, $statuses, true)) {
@@ -351,13 +389,19 @@ final class AdminTournamentController
             }
         }
 
+        $pickbanModes = ['coin_toss', 'higher_seed'];
+        if (!in_array($pickbanStartMode, $pickbanModes, true)) {
+            Flash::set('error', 'Mode pick/ban invalide.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
         $tRepo = new TournamentRepository();
         $t = $tRepo->findById($tournamentId);
         if ($t === null) {
             Response::notFound();
         }
 
-        $tRepo->updateSettings($tournamentId, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault, $bestOfFinal);
+        $tRepo->updateSettings($tournamentId, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault, $bestOfFinal, $pickbanStartMode);
 
         $this->audit($tournamentId, 'tournament.settings.update', 'tournament', $tournamentId, [
             'status' => $status,
@@ -366,9 +410,111 @@ final class AdminTournamentController
             'signup_closes_at' => $signupClosesAt,
             'best_of_default' => $bestOfDefault,
             'best_of_final' => $bestOfFinal,
+            'pickban_start_mode' => $pickbanStartMode,
         ]);
 
         Flash::set('success', 'Parametres mis a jour.');
+        Response::redirect('/admin/tournaments/' . $tournamentId);
+    }
+
+    /** @param array<string, string> $params */
+    public function updateRuleset(array $params = []): void
+    {
+        Auth::requireAdmin();
+
+        if (!Csrf::validate($_POST['csrf_token'] ?? null)) {
+            Response::badRequest('Invalid CSRF token');
+        }
+        Csrf::rotate();
+
+        $tournamentId = (int)($params['id'] ?? 0);
+        if ($tournamentId <= 0) {
+            Response::notFound();
+        }
+
+        $tRepo = new TournamentRepository();
+        $t = $tRepo->findById($tournamentId);
+        if ($t === null) {
+            Response::notFound();
+        }
+
+        $source = trim((string)($_POST['ruleset_source'] ?? ''));
+        if ($source === 'keep') {
+            Flash::set('success', 'Ruleset inchangé.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        $rulesetJson = null;
+        $sourceLabel = $source !== '' ? $source : 'none';
+
+        if ($source === '' || $source === 'none') {
+            $rulesetJson = null;
+        } elseif ($source === 'template:cs2' || $source === 'template:valorant') {
+            $tplId = str_replace('template:', '', $source);
+            $tpl = PickBanEngine::template($tplId);
+            $norm = PickBanEngine::normalizeTournamentRuleset($tpl);
+            if (!is_array($norm['ruleset'] ?? null)) {
+                Flash::set('error', (string)($norm['error'] ?? 'Template ruleset invalide.'));
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+            $rulesetJson = json_encode($norm['ruleset'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($rulesetJson) || $rulesetJson === '') {
+                Flash::set('error', 'Echec encodage ruleset.');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+        } elseif (str_starts_with($source, 'ruleset:')) {
+            $rid = (int)substr($source, strlen('ruleset:'));
+            if ($rid <= 0) {
+                Flash::set('error', 'Ruleset invalide.');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+
+            $rRepo = new RulesetRepository();
+            $r = $rRepo->findById($rid);
+            if ($r === null) {
+                Flash::set('error', 'Ruleset introuvable.');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+
+            $tgid = $t['game_id'] ?? null;
+            $tgid = (is_int($tgid) || is_string($tgid)) ? (int)$tgid : 0;
+            $rgid = $r['game_id'] ?? null;
+            $rgid = (is_int($rgid) || is_string($rgid)) ? (int)$rgid : 0;
+            if ($tgid > 0 && $rgid > 0 && $tgid !== $rgid) {
+                Flash::set('error', 'Ruleset incompatible avec le jeu du tournoi.');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+
+            $json = is_string($r['ruleset_json'] ?? null) ? trim((string)$r['ruleset_json']) : '';
+            if ($json === '') {
+                Flash::set('error', 'Ruleset invalide (vide).');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+
+            // Defensive: validate before applying.
+            $parsed = PickBanEngine::parseTournamentRuleset($json);
+            if (!is_array($parsed['ruleset'] ?? null)) {
+                Flash::set('error', (string)($parsed['error'] ?? 'Ruleset invalide.'));
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+            $rulesetJson = json_encode($parsed['ruleset'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($rulesetJson) || $rulesetJson === '') {
+                Flash::set('error', 'Echec encodage ruleset.');
+                Response::redirect('/admin/tournaments/' . $tournamentId);
+            }
+        } else {
+            Flash::set('error', 'Source ruleset invalide.');
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
+        $tRepo->updateRuleset($tournamentId, $rulesetJson);
+
+        $this->audit($tournamentId, 'tournament.ruleset.update', 'tournament', $tournamentId, [
+            'source' => $sourceLabel,
+            'enabled' => $rulesetJson !== null,
+        ]);
+
+        Flash::set('success', $rulesetJson !== null ? 'Ruleset active.' : 'Ruleset desactive.');
         Response::redirect('/admin/tournaments/' . $tournamentId);
     }
 

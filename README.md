@@ -9,6 +9,13 @@ docker compose up -d --build
 docker compose exec php php bin/migrate.php
 ```
 
+Si tu avais deja une base de donnees (ancien volume Docker) et que les migrations ont ete "squash", fais un reset:
+
+```bash
+bin/dev.sh reset
+bin/dev.sh up
+```
+
 Ou en 1 commande:
 
 ```bash

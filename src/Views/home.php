@@ -72,7 +72,19 @@ use DuelDesk\Support\Auth;
     <?php else: ?>
         <div class="cards">
             <?php foreach ($recentTournaments as $t): ?>
-                <a class="card card--link" href="/t/<?= View::e((string)($t['slug'] ?? '')) ?>">
+                <?php
+                    $tid = (int)($t['id'] ?? 0);
+                    $tslug = (string)($t['slug'] ?? '');
+                    $href = '#';
+                    if (Auth::isAdmin() && $tid > 0) {
+                        $href = '/tournaments/' . $tid;
+                    } elseif ($tslug !== '') {
+                        $href = '/t/' . $tslug;
+                    } elseif ($tid > 0) {
+                        $href = '/tournaments/' . $tid;
+                    }
+                ?>
+                <a class="card card--link" href="<?= View::e($href) ?>">
                     <div class="card__header">
                         <div class="card__title"><?= View::e((string)$t['name']) ?></div>
                         <div class="pill"><?= View::e((string)$t['format']) ?></div>

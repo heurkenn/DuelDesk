@@ -780,15 +780,23 @@
     });
   };
 
-  const alerts = Array.from(document.querySelectorAll('.alert'));
-  for (const el of alerts) {
-    const timeout = window.setTimeout(() => {
-      el.classList.add('is-dismissed');
-      window.setTimeout(() => el.remove(), 250);
-    }, 4500);
+  const armAlerts = (root = document) => {
+    const alerts = Array.from(root.querySelectorAll('.alert'));
+    for (const el of alerts) {
+      if (!(el instanceof HTMLElement)) continue;
+      if (el.dataset.ddArmed === '1') continue;
+      el.dataset.ddArmed = '1';
 
-    el.addEventListener('mouseenter', () => window.clearTimeout(timeout), { once: true });
-  }
+      const timeout = window.setTimeout(() => {
+        el.classList.add('is-dismissed');
+        window.setTimeout(() => el.remove(), 250);
+      }, 4500);
+
+      el.addEventListener('mouseenter', () => window.clearTimeout(timeout), { once: true });
+    }
+  };
+
+  armAlerts(document);
 
   document.addEventListener('submit', (e) => {
     const form = e.target;
@@ -801,6 +809,280 @@
       e.preventDefault();
     }
   });
+
+  // Match page: submit pick/ban + report forms without a full reload (fetch HTML, patch fragments).
+  let ddSubmitInFlight = false;
+  let ddLiveInFlight = false;
+
+  const replaceFromDoc = (doc, selector, { update = true } = {}) => {
+    if (!update) return false;
+    const cur = document.querySelector(selector);
+    const next = doc.querySelector(selector);
+    if (!(cur instanceof Element) || !(next instanceof Element)) return false;
+    cur.replaceWith(next);
+    return true;
+  };
+
+  const fetchAndPatch = async (url, { updateFlash = true } = {}) => {
+    const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    replaceFromDoc(doc, '[data-dd-match-meta]');
+    replaceFromDoc(doc, '[data-partial="pickban"]');
+    replaceFromDoc(doc, '[data-partial="report"]');
+    replaceFromDoc(doc, '[data-flash-root]', { update: updateFlash });
+
+    armAlerts(document);
+  };
+
+  const submitAjaxForm = async (form, submitter = null) => {
+    if (ddSubmitInFlight) return;
+    ddSubmitInFlight = true;
+
+    const method = (form.getAttribute('method') || 'GET').toUpperCase();
+    const action = form.getAttribute('action') || window.location.href;
+
+    // Include clicked submit button value (map_key) when applicable.
+    const fd = new FormData(form);
+    if (submitter instanceof HTMLElement) {
+      const n = submitter.getAttribute('name') || '';
+      if (n) fd.set(n, submitter.getAttribute('value') || '');
+    }
+
+    const disableAll = Array.from(form.querySelectorAll('button, input[type="submit"]'))
+      .filter((el) => el instanceof HTMLElement);
+
+    for (const el of disableAll) {
+      el.setAttribute('disabled', '');
+    }
+
+    try {
+      const res = await fetch(action, {
+        method,
+        body: method === 'GET' ? null : fd,
+        credentials: 'same-origin',
+        redirect: 'follow',
+        cache: 'no-store',
+        headers: { 'X-Requested-With': 'DuelDeskFetch' },
+      });
+
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+
+      // Patch only known fragments when present (match page).
+      let patched = false;
+      patched = replaceFromDoc(doc, '[data-dd-match-meta]') || patched;
+      patched = replaceFromDoc(doc, '[data-partial="pickban"]') || patched;
+      patched = replaceFromDoc(doc, '[data-partial="report"]') || patched;
+      patched = replaceFromDoc(doc, '[data-flash-root]', { update: true }) || patched;
+
+      armAlerts(document);
+
+      // If we didn't patch anything, show the full server response (error page, etc.).
+      if (!patched) {
+        document.open();
+        document.write(html);
+        document.close();
+      }
+    } catch {
+      // Last resort: let the normal flow happen via a native submit.
+      try {
+        if (method !== 'GET') {
+          if (submitter instanceof HTMLElement) {
+            const n = submitter.getAttribute('name') || '';
+            if (n) {
+              const h = document.createElement('input');
+              h.type = 'hidden';
+              h.name = n;
+              h.value = submitter.getAttribute('value') || '';
+              form.appendChild(h);
+            }
+          }
+          form.submit();
+          return;
+        }
+      } catch {}
+
+      window.location.href = action;
+    } finally {
+      ddSubmitInFlight = false;
+      for (const el of disableAll) {
+        el.removeAttribute('disabled');
+      }
+    }
+  };
+
+  document.addEventListener('submit', (e) => {
+    if (e.defaultPrevented) return;
+
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (form.getAttribute('data-ajax') !== '1') return;
+
+    e.preventDefault();
+    const submitter = e.submitter || null;
+    submitAjaxForm(form, submitter);
+  });
+
+  const setupMatchLive = () => {
+    const getMeta = () => document.querySelector('[data-dd-match-meta]');
+    const meta0 = getMeta();
+    if (!(meta0 instanceof HTMLElement)) return;
+
+    const shouldPoll = () => {
+      const meta = getMeta();
+      if (!(meta instanceof HTMLElement)) return false;
+      const st = meta.dataset.status || '';
+      const pbReq = meta.dataset.pickbanRequired === '1';
+      const pbLocked = meta.dataset.pickbanLocked === '1';
+      if (st === 'confirmed' || st === 'void') return false;
+      if (pbReq && !pbLocked) return true;
+      if (st === 'reported' || st === 'disputed') return true;
+      return false;
+    };
+
+	    const tick = async () => {
+	      if (!shouldPoll()) return;
+	      if (ddSubmitInFlight) return;
+	      if (document.visibilityState && document.visibilityState !== 'visible') return;
+
+      // Avoid clobbering inputs while the user types.
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.closest('[data-partial="report"]')) return;
+
+	      await fetchAndPatch(window.location.pathname, { updateFlash: false });
+	    };
+
+    // Small delay so we don't fight the initial render.
+    window.setTimeout(() => {
+      if (!shouldPoll()) return;
+      tick();
+      const iv = window.setInterval(() => {
+        if (!shouldPoll()) {
+          window.clearInterval(iv);
+          return;
+        }
+        tick();
+      }, 3500);
+    }, 1200);
+  };
+
+  const setupTournamentLive = () => {
+    const el = document.querySelector('[data-dd-tournament-live]');
+    if (!(el instanceof HTMLElement)) return;
+    const tid = el.dataset.tournamentId || '';
+    if (!tid || tid === '0') return;
+
+    const ensureAlert = (card, on) => {
+      if (!(card instanceof HTMLElement)) return;
+      const existing = card.querySelector('.matchcard__alert');
+      if (on) {
+        if (existing) return;
+        const s = document.createElement('span');
+        s.className = 'matchcard__alert';
+        s.title = 'Pick/Ban requis';
+        s.setAttribute('aria-hidden', 'true');
+        s.textContent = '!';
+        card.prepend(s);
+      } else if (existing) {
+        existing.remove();
+      }
+    };
+
+	    const apply = (m) => {
+	      const id = m && typeof m.id === 'number' ? String(m.id) : '';
+	      if (!id) return;
+
+	      const card = document.querySelector(`.matchcard[data-match-id="${id}"]`);
+	      if (!(card instanceof HTMLElement)) return;
+
+      const st = String(m.status || '');
+      card.dataset.status = st;
+      card.classList.toggle('is-confirmed', st === 'confirmed');
+      card.classList.toggle('is-reported', st === 'reported');
+      card.classList.toggle('is-disputed', st === 'disputed');
+
+      card.dataset.bestOf = String(m.best_of || 0);
+      card.dataset.scheduledAt = String(m.scheduled_at || '');
+
+      card.dataset.reportedScore1 = (m.reported_score1 === null || typeof m.reported_score1 === 'undefined') ? '' : String(m.reported_score1);
+      card.dataset.reportedScore2 = (m.reported_score2 === null || typeof m.reported_score2 === 'undefined') ? '' : String(m.reported_score2);
+      card.dataset.reportedWinnerSlot = (m.reported_winner_slot === null || typeof m.reported_winner_slot === 'undefined') ? '' : String(m.reported_winner_slot);
+      card.dataset.reportedBy = String(m.reported_by_username || '');
+      card.dataset.reportedAt = String(m.reported_at || '');
+
+      card.dataset.counterReportedScore1 = (m.counter_reported_score1 === null || typeof m.counter_reported_score1 === 'undefined') ? '' : String(m.counter_reported_score1);
+      card.dataset.counterReportedScore2 = (m.counter_reported_score2 === null || typeof m.counter_reported_score2 === 'undefined') ? '' : String(m.counter_reported_score2);
+      card.dataset.counterReportedWinnerSlot = (m.counter_reported_winner_slot === null || typeof m.counter_reported_winner_slot === 'undefined') ? '' : String(m.counter_reported_winner_slot);
+      card.dataset.counterReportedBy = String(m.counter_reported_by_username || '');
+      card.dataset.counterReportedAt = String(m.counter_reported_at || '');
+
+      card.dataset.aName = String(m.a_label || '');
+      card.dataset.bName = String(m.b_label || '');
+      card.dataset.score1 = String(m.score1 || 0);
+      card.dataset.score2 = String(m.score2 || 0);
+      card.dataset.winnerSlot = String(m.winner_slot || 0);
+
+      const slotEls = Array.from(card.querySelectorAll('.matchcard__slot'));
+      const aSlot = slotEls[0] instanceof HTMLElement ? slotEls[0] : null;
+      const bSlot = slotEls[1] instanceof HTMLElement ? slotEls[1] : null;
+
+      if (aSlot) {
+        const name = aSlot.querySelector('.matchcard__name');
+        const score = aSlot.querySelector('.matchcard__score');
+        if (name) name.textContent = String(m.a_label || '');
+        if (score) score.textContent = String(m.card_s1 || '-');
+        aSlot.classList.toggle('is-empty', !!m.a_empty);
+        aSlot.classList.toggle('is-winner', (m.winner_slot || 0) === 1);
+      }
+      if (bSlot) {
+        const name = bSlot.querySelector('.matchcard__name');
+        const score = bSlot.querySelector('.matchcard__score');
+        if (name) name.textContent = String(m.b_label || '');
+        if (score) score.textContent = String(m.card_s2 || '-');
+        bSlot.classList.toggle('is-empty', !!m.b_empty);
+        bSlot.classList.toggle('is-winner', (m.winner_slot || 0) === 2);
+      }
+
+      const pending = !!m.pickban_pending;
+      card.dataset.pickbanPending = pending ? '1' : '';
+      ensureAlert(card, pending);
+    };
+
+	    const tick = async () => {
+	      if (ddSubmitInFlight) return;
+	      if (ddLiveInFlight) return;
+	      if (document.visibilityState && document.visibilityState !== 'visible') return;
+
+      // Skip when bracket isn't on screen to keep it cheap.
+      const bracketPanel = document.querySelector('[data-tpanel="bracket"]');
+      if (bracketPanel instanceof HTMLElement && bracketPanel.hasAttribute('hidden')) return;
+
+	      ddLiveInFlight = true;
+	      try {
+	        const res = await fetch(`/tournaments/${tid}/live`, {
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+
+        const data = await res.json();
+        if (!data || data.ok !== true || !Array.isArray(data.matches)) return;
+        for (const m of data.matches) apply(m);
+	      } catch {
+	        // ignore
+	      } finally {
+	        ddLiveInFlight = false;
+	      }
+	    };
+
+    window.setTimeout(() => {
+      tick();
+      window.setInterval(tick, 6000);
+    }, 1200);
+  };
 
   // Expose redraw so panels can trigger it when a hidden bracket becomes visible.
   window.DuelDesk = window.DuelDesk || {};
@@ -820,4 +1102,6 @@
   setupDropLinesToggle();
   setupBracketExport();
   setupMatchModal();
+  setupMatchLive();
+  setupTournamentLive();
 })();

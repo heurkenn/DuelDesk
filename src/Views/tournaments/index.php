@@ -75,7 +75,19 @@ function tournaments_page_link(int $page, string $query): string
                         <td><span class="pill"><?= View::e((string)$t['format']) ?></span></td>
                         <td><span class="pill pill--soft"><?= View::e((string)$t['status']) ?></span></td>
                         <td><?= $t['starts_at'] ? View::e((string)$t['starts_at']) : '<span class="muted">-</span>' ?></td>
-                        <td class="table__right"><a class="link" href="/t/<?= View::e((string)($t['slug'] ?? '')) ?>">Ouvrir</a></td>
+                        <td class="table__right">
+                            <?php $id = (int)($t['id'] ?? 0); $slug = (string)($t['slug'] ?? ''); ?>
+                            <?php if (Auth::isAdmin() && $id > 0): ?>
+                                <a class="link" href="/tournaments/<?= (int)$id ?>">Ouvrir</a>
+                                <?php if ($slug !== ''): ?>
+                                    <span class="meta__dot" aria-hidden="true"></span>
+                                    <a class="link" href="/t/<?= View::e($slug) ?>">Public</a>
+                                <?php endif; ?>
+                            <?php else: ?>
+                                <?php $href = $slug !== '' ? ('/t/' . $slug) : ($id > 0 ? ('/tournaments/' . $id) : '#'); ?>
+                                <a class="link" href="<?= View::e($href) ?>">Ouvrir</a>
+                            <?php endif; ?>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

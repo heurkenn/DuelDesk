@@ -4,14 +4,18 @@ RUN set -eux; \
     apk add --no-cache \
       freetype \
       libjpeg-turbo \
-      libpng; \
+      libpng \
+      libcurl \
+      ca-certificates; \
     apk add --no-cache --virtual .build-deps \
       freetype-dev \
       libjpeg-turbo-dev \
-      libpng-dev; \
+      libpng-dev \
+      curl-dev; \
     docker-php-ext-configure gd --with-freetype --with-jpeg; \
     docker-php-ext-install -j"$(nproc)" pdo_mysql; \
     docker-php-ext-install -j"$(nproc)" gd; \
+    docker-php-ext-install -j"$(nproc)" curl; \
     docker-php-ext-enable opcache; \
     apk del .build-deps
 

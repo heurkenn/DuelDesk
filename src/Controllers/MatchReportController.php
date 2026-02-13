@@ -7,9 +7,11 @@ namespace DuelDesk\Controllers;
 use DuelDesk\Http\Response;
 use DuelDesk\Repositories\AuditLogRepository;
 use DuelDesk\Repositories\MatchRepository;
+use DuelDesk\Repositories\PickBanRepository;
 use DuelDesk\Repositories\PlayerRepository;
 use DuelDesk\Repositories\TeamMemberRepository;
 use DuelDesk\Repositories\TournamentRepository;
+use DuelDesk\Services\PickBanEngine;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
 use DuelDesk\Support\Flash;
@@ -88,7 +90,7 @@ final class MatchReportController
             Response::redirect('/tournaments/' . $tournamentId . '/matches/' . $matchId);
         }
 
-        // Best-of validation (same rules as admin).
+        // Best-of (used for pick/ban ruleset + score validation).
         $bestOf = (int)($match['best_of'] ?? 0);
         if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
             $bestOf = (int)($t['best_of_default'] ?? 3);
@@ -97,6 +99,31 @@ final class MatchReportController
             $bestOf = 3;
         }
 
+        // Pick/Ban is mandatory (when configured) before players/captains can report a score.
+        if (!Auth::isAdmin()) {
+            $pbRepo = new PickBanRepository();
+            $state = $pbRepo->findState($matchId);
+            if (is_array($state)) {
+                if (((string)($state['status'] ?? 'running')) !== 'locked') {
+                    Flash::set('error', 'Pick/Ban obligatoire avant le debut du match.');
+                    Response::redirect('/tournaments/' . $tournamentId . '/matches/' . $matchId);
+                }
+            } else {
+                $rulesetJson = is_string($t['ruleset_json'] ?? null) ? trim((string)$t['ruleset_json']) : '';
+                if ($rulesetJson !== '') {
+                    $parsed = PickBanEngine::parseTournamentRuleset($rulesetJson);
+                    if (is_array($parsed['ruleset'] ?? null)) {
+                        $cfg = PickBanEngine::buildMatchConfigSnapshot($parsed['ruleset'], $bestOf);
+                        if (is_array($cfg)) {
+                            Flash::set('error', 'Pick/Ban obligatoire avant le debut du match.');
+                            Response::redirect('/tournaments/' . $tournamentId . '/matches/' . $matchId);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Best-of validation (same rules as admin).
         $winsToTake = intdiv($bestOf, 2) + 1;
         $looksLikeSeries = ($score1 <= $bestOf) && ($score2 <= $bestOf);
 

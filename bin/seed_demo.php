@@ -15,6 +15,7 @@ use DuelDesk\Repositories\TournamentRepository;
 use DuelDesk\Repositories\TournamentTeamRepository;
 use DuelDesk\Repositories\UserRepository;
 use DuelDesk\Services\BracketGenerator;
+use DuelDesk\Services\PickBanEngine;
 
 final class DemoSeeder
 {
@@ -89,6 +90,7 @@ final class DemoSeeder
             'published'
         );
         $this->seedTeams($tCs2, 4, 5, 'dd_cs2_', $pwHash, 'CS2');
+        $this->ensureTournamentRulesetTemplate($tCs2, 'cs2');
         $this->ensureGenerated($tCs2, 'double_elim', 'team');
 
         fwrite(STDOUT, "\nSeed done.\n");
@@ -214,6 +216,32 @@ final class DemoSeeder
             $this->ttRepo->add($tournamentId, $teamId);
             $this->ttRepo->setSeed($tournamentId, $teamId, $i);
         }
+    }
+
+    private function ensureTournamentRulesetTemplate(int $tournamentId, string $templateId): void
+    {
+        $t = $this->tRepo->findById($tournamentId);
+        if (!is_array($t)) {
+            return;
+        }
+
+        $existing = is_string($t['ruleset_json'] ?? null) ? trim((string)$t['ruleset_json']) : '';
+        if ($existing !== '') {
+            return;
+        }
+
+        $tpl = PickBanEngine::template($templateId);
+        $norm = PickBanEngine::normalizeTournamentRuleset($tpl);
+        if (!is_array($norm['ruleset'] ?? null)) {
+            return;
+        }
+
+        $json = json_encode($norm['ruleset'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($json) || $json === '') {
+            return;
+        }
+
+        $this->tRepo->updateRuleset($tournamentId, $json);
     }
 
     private function ensureTeam(int $tournamentId, string $teamName, int $createdByUserId): int

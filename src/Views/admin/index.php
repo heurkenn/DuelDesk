@@ -16,6 +16,8 @@ use DuelDesk\View;
     <div class="pagehead__actions">
         <a class="btn btn--ghost" href="/admin/users">Utilisateurs</a>
         <a class="btn btn--ghost" href="/admin/games">Jeux</a>
+        <a class="btn btn--ghost" href="/admin/lan">LAN</a>
+        <a class="btn btn--ghost" href="/admin/rulesets">Rulesets</a>
         <a class="btn btn--primary" href="/tournaments/new">Nouveau tournoi</a>
     </div>
 </div>

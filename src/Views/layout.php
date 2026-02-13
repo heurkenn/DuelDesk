@@ -12,6 +12,7 @@ if ($path !== '/') {
 }
 
 $isPublicTournamentRoute = str_starts_with($path, '/t/');
+$isPublicShareRoute = $isPublicTournamentRoute || (str_starts_with($path, '/lan/') && $path !== '/lan');
 
 function nav_is_active(string $currentPath, string $prefix): bool
 {
@@ -73,13 +74,14 @@ try {
                 <a class="nav__link" href="/" <?= nav_is_active($path, '/') ? 'aria-current="page"' : '' ?>>Dashboard</a>
                 <?php $isTournaments = nav_is_active($path, '/tournaments') || nav_is_active($path, '/t'); ?>
                 <a class="nav__link" href="/tournaments" <?= $isTournaments ? 'aria-current="page"' : '' ?>>Tournois</a>
-                <?php if ($isAdmin && !$isPublicTournamentRoute): ?>
+                <a class="nav__link" href="/lan" <?= nav_is_active($path, '/lan') ? 'aria-current="page"' : '' ?>>LAN</a>
+                <?php if ($isAdmin && !$isPublicShareRoute): ?>
                     <a class="nav__link" href="/admin" <?= nav_is_active($path, '/admin') ? 'aria-current="page"' : '' ?>>Admin</a>
                 <?php endif; ?>
             </nav>
 
             <div class="topbar__cta">
-                <?php if ($isAdmin && !$isPublicTournamentRoute): ?>
+                <?php if ($isAdmin && !$isPublicShareRoute): ?>
                     <a class="btn btn--primary" href="/tournaments/new">Nouveau tournoi</a>
                 <?php endif; ?>
 
@@ -105,7 +107,9 @@ try {
     </header>
 
     <main class="container">
-        <?php require __DIR__ . '/partials/flash.php'; ?>
+        <div data-flash-root>
+            <?php require __DIR__ . '/partials/flash.php'; ?>
+        </div>
         <?= $content ?>
     </main>
 

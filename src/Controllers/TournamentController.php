@@ -6,12 +6,15 @@ namespace DuelDesk\Controllers;
 
 use DuelDesk\Http\Response;
 use DuelDesk\Repositories\GameRepository;
+use DuelDesk\Repositories\LanEventRepository;
 use DuelDesk\Repositories\MatchRepository;
+use DuelDesk\Repositories\PickBanRepository;
 use DuelDesk\Repositories\TeamMemberRepository;
 use DuelDesk\Repositories\TournamentTeamRepository;
 use DuelDesk\Repositories\TournamentRepository;
 use DuelDesk\Repositories\TournamentPlayerRepository;
 use DuelDesk\Repositories\PlayerRepository;
+use DuelDesk\Services\PickBanEngine;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
 use DuelDesk\Support\Flash;
@@ -53,9 +56,22 @@ final class TournamentController
         $games = $gRepo->all();
         $defaultGameId = $games !== [] ? (string)$games[0]['id'] : '';
 
+        $lanRepo = new LanEventRepository();
+        $lanEvents = $lanRepo->listForSelect();
+        $defaultLanId = '';
+        $lanIdRaw = trim((string)($_GET['lan_event_id'] ?? ''));
+        if ($lanIdRaw !== '' && ctype_digit($lanIdRaw) && (int)$lanIdRaw > 0) {
+            $lanId = (int)$lanIdRaw;
+            $exists = $lanRepo->findById($lanId);
+            if ($exists !== null) {
+                $defaultLanId = (string)$lanId;
+            }
+        }
+
         View::render('tournaments/new', [
             'title' => 'Nouveau tournoi | DuelDesk',
             'games' => $games,
+            'lanEvents' => $lanEvents,
             'old' => [
                 'name' => '',
                 'game_id' => $defaultGameId,
@@ -66,6 +82,8 @@ final class TournamentController
                 'signup_closes_at' => '',
                 'best_of_default' => '3',
                 'best_of_final' => '',
+                'pickban_start_mode' => 'coin_toss',
+                'lan_event_id' => $defaultLanId,
                 'status' => 'draft',
                 'starts_at' => '',
             ],
@@ -93,6 +111,8 @@ final class TournamentController
         $signupClosesAtRaw = (string)($_POST['signup_closes_at'] ?? '');
         $bestOfRaw = trim((string)($_POST['best_of_default'] ?? '3'));
         $bestOfFinalRaw = trim((string)($_POST['best_of_final'] ?? ''));
+        $pickbanStartMode = trim((string)($_POST['pickban_start_mode'] ?? 'coin_toss'));
+        $lanEventIdRaw = trim((string)($_POST['lan_event_id'] ?? ''));
         $status = (string)($_POST['status'] ?? 'draft');
         $startsAtRaw = (string)($_POST['starts_at'] ?? '');
 
@@ -106,12 +126,17 @@ final class TournamentController
             'signup_closes_at' => $signupClosesAtRaw,
             'best_of_default' => $bestOfRaw,
             'best_of_final' => $bestOfFinalRaw,
+            'pickban_start_mode' => $pickbanStartMode,
+            'lan_event_id' => $lanEventIdRaw,
             'status' => $status,
             'starts_at' => $startsAtRaw,
         ];
 
         $gRepo = new GameRepository();
         $games = $gRepo->all();
+
+        $lanRepo = new LanEventRepository();
+        $lanEvents = $lanRepo->listForSelect();
 
         $errors = [];
         if ($name === '' || $this->strlenSafe($name) > 120) {
@@ -203,10 +228,28 @@ final class TournamentController
             }
         }
 
+        $pickbanModes = ['coin_toss', 'higher_seed'];
+        if (!in_array($pickbanStartMode, $pickbanModes, true)) {
+            $errors['pickban_start_mode'] = 'Mode pick/ban invalide.';
+        }
+
+        $lanEventId = null;
+        if ($lanEventIdRaw !== '') {
+            if (!ctype_digit($lanEventIdRaw)) {
+                $errors['lan_event_id'] = 'LAN invalide.';
+            } else {
+                $lanEventId = (int)$lanEventIdRaw;
+                if ($lanEventId <= 0 || $lanRepo->findById($lanEventId) === null) {
+                    $errors['lan_event_id'] = 'LAN introuvable.';
+                }
+            }
+        }
+
         if ($errors !== []) {
             View::render('tournaments/new', [
                 'title' => 'Nouveau tournoi | DuelDesk',
                 'games' => $games,
+                'lanEvents' => $lanEvents,
                 'old' => $old,
                 'errors' => $errors,
                 'csrfToken' => Csrf::token(),
@@ -217,7 +260,7 @@ final class TournamentController
         $gameName = (string)$game['name'];
 
         $repo = new TournamentRepository();
-        $id = $repo->create(Auth::id(), $gameId, $gameName, $name, $format, $participantType, $teamSize, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault, $bestOfFinal);
+        $id = $repo->create(Auth::id(), $gameId, $gameName, $name, $format, $participantType, $teamSize, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault, $bestOfFinal, $pickbanStartMode, $lanEventId);
 
         Flash::set('success', 'Tournoi cree.');
         Response::redirect('/tournaments/' . $id);
@@ -284,6 +327,141 @@ final class TournamentController
         }
 
         $canReport = false;
+        $pickbanMySlot = null;
+        $pickbanRequired = false;
+        $pickbanLocked = false;
+        $pickbanBlockingReport = false;
+        $pickbanState = null;
+        $pickbanActions = [];
+        $pickbanSides = [];
+        $pickbanComputed = null;
+        $pickbanIsMyTurn = false;
+        $pickbanStartMode = (string)($tournament['pickban_start_mode'] ?? 'coin_toss');
+        if (!in_array($pickbanStartMode, ['coin_toss', 'higher_seed'], true)) {
+            $pickbanStartMode = 'coin_toss';
+        }
+        $pickbanSeedA = null;
+        $pickbanSeedB = null;
+        $pickbanHigherSeedSlot = null;
+
+        $matchComplete = $participantType === 'team'
+            ? ($match['team1_id'] !== null && $match['team2_id'] !== null)
+            : ($match['player1_id'] !== null && $match['player2_id'] !== null);
+
+        $status = (string)($match['status'] ?? 'pending');
+
+        // Determine if pick/ban is enabled for this match (depends on tournament ruleset + BO).
+        $rulesetJson = is_string($tournament['ruleset_json'] ?? null) ? trim((string)$tournament['ruleset_json']) : '';
+        $pickbanConfig = null;
+        if ($rulesetJson !== '' && $matchComplete && !in_array($status, ['confirmed', 'void'], true)) {
+            $bestOf = (int)($match['best_of'] ?? 0);
+            if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+                $bestOf = (int)($tournament['best_of_default'] ?? 3);
+            }
+            if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+                $bestOf = 3;
+            }
+
+            $parsed = PickBanEngine::parseTournamentRuleset($rulesetJson);
+            if (is_array($parsed['ruleset'] ?? null)) {
+                $pickbanConfig = PickBanEngine::buildMatchConfigSnapshot($parsed['ruleset'], $bestOf);
+            }
+        }
+
+        // Load pick/ban state if any (uses a snapshot stored per match).
+        if ($matchComplete && !in_array($status, ['confirmed', 'void'], true)) {
+            $pbRepo = new PickBanRepository();
+            $pickbanState = $pbRepo->findState($matchId);
+            if (is_array($pickbanState)) {
+                $pickbanRequired = true;
+                $pickbanLocked = ((string)($pickbanState['status'] ?? 'running')) === 'locked';
+                $pickbanActions = $pbRepo->listActions($matchId);
+                $pickbanSides = $pbRepo->listSides($matchId);
+
+                $cfgFromState = PickBanEngine::decodeJson((string)($pickbanState['config_json'] ?? ''));
+                if (is_array($cfgFromState)) {
+                    $pickbanConfig = $cfgFromState;
+                }
+
+                $firstTurnSlot = (int)($pickbanState['first_turn_slot'] ?? 0);
+                if (is_array($pickbanConfig)) {
+                    $pickbanComputed = PickBanEngine::compute($pickbanConfig, $firstTurnSlot, $pickbanActions, $pickbanSides);
+                }
+            } elseif ($pickbanConfig !== null) {
+                $pickbanRequired = true;
+            }
+        }
+
+        // Higher seed (optional): can decide who is Team A/B instead of coin toss.
+        $pbCoinCallSlot = is_array($pickbanState) ? (int)($pickbanState['coin_call_slot'] ?? 0) : 0;
+        $startedAsHigherSeed = is_array($pickbanState) && ($pbCoinCallSlot !== 1 && $pbCoinCallSlot !== 2);
+        if (($pickbanStartMode === 'higher_seed' || $startedAsHigherSeed) && $pickbanRequired && $matchComplete) {
+            if ($participantType === 'team') {
+                $aId = $match['team1_id'] !== null ? (int)$match['team1_id'] : 0;
+                $bId = $match['team2_id'] !== null ? (int)$match['team2_id'] : 0;
+                if ($aId > 0 && $bId > 0) {
+                    $ttRepo = new TournamentTeamRepository();
+                    $pickbanSeedA = $ttRepo->findSeed($tournamentId, $aId);
+                    $pickbanSeedB = $ttRepo->findSeed($tournamentId, $bId);
+                }
+            } else {
+                $aId = $match['player1_id'] !== null ? (int)$match['player1_id'] : 0;
+                $bId = $match['player2_id'] !== null ? (int)$match['player2_id'] : 0;
+                if ($aId > 0 && $bId > 0) {
+                    $tpRepo = new TournamentPlayerRepository();
+                    $pickbanSeedA = $tpRepo->findSeed($tournamentId, $aId);
+                    $pickbanSeedB = $tpRepo->findSeed($tournamentId, $bId);
+                }
+            }
+
+            if ($pickbanSeedA !== null && $pickbanSeedB !== null) {
+                $pickbanHigherSeedSlot = $pickbanSeedA <= $pickbanSeedB ? 1 : 2;
+            } elseif ($pickbanSeedA !== null) {
+                $pickbanHigherSeedSlot = 1;
+            } elseif ($pickbanSeedB !== null) {
+                $pickbanHigherSeedSlot = 2;
+            } else {
+                $pickbanHigherSeedSlot = 1;
+            }
+        }
+
+        // Resolve my pick/ban slot (A/B) for UI + turn checking.
+        // Note: admins can also be participants/captains; don't block slot resolution based on role.
+        if ($pickbanRequired && Auth::check() && $matchComplete) {
+            $meId = Auth::id();
+            if ($meId !== null) {
+                if ($participantType === 'team') {
+                    $t1 = $match['team1_id'] !== null ? (int)$match['team1_id'] : 0;
+                    $t2 = $match['team2_id'] !== null ? (int)$match['team2_id'] : 0;
+                    if ($t1 > 0 || $t2 > 0) {
+                        $tmRepo = new TeamMemberRepository();
+                        if ($t1 > 0 && $tmRepo->isCaptain($t1, $meId)) {
+                            $pickbanMySlot = 1;
+                        } elseif ($t2 > 0 && $tmRepo->isCaptain($t2, $meId)) {
+                            $pickbanMySlot = 2;
+                        }
+                    }
+                } else {
+                    $pRepo = new PlayerRepository();
+                    $p = $pRepo->findByUserId($meId);
+                    if ($p !== null) {
+                        $pid = (int)($p['id'] ?? 0);
+                        $a = $match['player1_id'] !== null ? (int)$match['player1_id'] : 0;
+                        $b = $match['player2_id'] !== null ? (int)$match['player2_id'] : 0;
+                        if ($pid > 0 && $pid === $a) {
+                            $pickbanMySlot = 1;
+                        } elseif ($pid > 0 && $pid === $b) {
+                            $pickbanMySlot = 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($pickbanRequired && !$pickbanLocked && !Auth::isAdmin()) {
+            $pickbanBlockingReport = true;
+        }
+
         if (Auth::check()) {
             if (Auth::isAdmin()) {
                 $canReport = true;
@@ -322,6 +500,16 @@ final class TournamentController
             }
         }
 
+        if ($pickbanBlockingReport) {
+            $canReport = false;
+        }
+
+        if (is_array($pickbanComputed) && ($pickbanComputed['ok'] ?? false) && $pickbanMySlot !== null) {
+            $nextStep = (string)($pickbanComputed['next_step'] ?? '');
+            $nextSlot = (int)($pickbanComputed['next_slot'] ?? 0);
+            $pickbanIsMyTurn = in_array($nextStep, ['ban', 'pick', 'side'], true) && $nextSlot === $pickbanMySlot;
+        }
+
         View::render('tournaments/match', [
             'title' => 'Match | ' . ((string)($tournament['name'] ?? 'Tournoi')) . ' | DuelDesk',
             'tournament' => $tournament,
@@ -329,6 +517,19 @@ final class TournamentController
             'participantType' => $participantType,
             'csrfToken' => Csrf::token(),
             'canReport' => $canReport,
+            'pickbanRequired' => $pickbanRequired,
+            'pickbanLocked' => $pickbanLocked,
+            'pickbanBlockingReport' => $pickbanBlockingReport,
+            'pickbanState' => $pickbanState,
+            'pickbanActions' => $pickbanActions,
+            'pickbanSides' => $pickbanSides,
+            'pickbanComputed' => $pickbanComputed,
+            'pickbanMySlot' => $pickbanMySlot,
+            'pickbanIsMyTurn' => $pickbanIsMyTurn,
+            'pickbanStartMode' => $pickbanStartMode,
+            'pickbanHigherSeedSlot' => $pickbanHigherSeedSlot,
+            'pickbanSeedA' => $pickbanSeedA,
+            'pickbanSeedB' => $pickbanSeedB,
         ]);
     }
 
@@ -409,6 +610,68 @@ final class TournamentController
             ? $mRepo->listTeamForTournament($id)
             : $mRepo->listSoloForTournament($id);
 
+        // Pick/Ban pending state: used by the bracket UI to show an "attention" marker.
+        $pbByMatchId = [];
+        $matchIds = [];
+        foreach ($matches as $m) {
+            $mid = (int)($m['id'] ?? 0);
+            if ($mid > 0) {
+                $matchIds[] = $mid;
+            }
+        }
+        if ($matchIds !== []) {
+            $pbRepo = new PickBanRepository();
+            $pbByMatchId = $pbRepo->listStatesByMatchIds($matchIds);
+        }
+
+        $rulesetJson = is_string($tournament['ruleset_json'] ?? null) ? trim((string)$tournament['ruleset_json']) : '';
+        $cfgByBo = [];
+        if ($rulesetJson !== '') {
+            $parsed = PickBanEngine::parseTournamentRuleset($rulesetJson);
+            $ruleset = $parsed['ruleset'] ?? null;
+            if (is_array($ruleset)) {
+                foreach ([1, 3, 5, 7, 9] as $bo) {
+                    $cfgByBo[$bo] = PickBanEngine::buildMatchConfigSnapshot($ruleset, $bo);
+                }
+            }
+        }
+
+        foreach ($matches as $i => $m) {
+            $mid = (int)($m['id'] ?? 0);
+            $st = (string)($m['status'] ?? 'pending');
+            if (in_array($st, ['confirmed', 'void'], true)) {
+                $matches[$i]['pickban_pending'] = false;
+                continue;
+            }
+
+            $matchComplete = $participantType === 'team'
+                ? ($m['team1_id'] !== null && $m['team2_id'] !== null)
+                : ($m['player1_id'] !== null && $m['player2_id'] !== null);
+
+            if (!$matchComplete) {
+                $matches[$i]['pickban_pending'] = false;
+                continue;
+            }
+
+            $bestOf = (int)($m['best_of'] ?? 0);
+            if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+                $bestOf = (int)($tournament['best_of_default'] ?? 3);
+            }
+            if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+                $bestOf = 3;
+            }
+
+            $required = $rulesetJson !== '' && array_key_exists($bestOf, $cfgByBo) && is_array($cfgByBo[$bestOf]);
+            if (!$required) {
+                $matches[$i]['pickban_pending'] = false;
+                continue;
+            }
+
+            $state = $mid > 0 ? ($pbByMatchId[$mid] ?? null) : null;
+            $locked = is_array($state) && ((string)($state['status'] ?? 'running')) === 'locked';
+            $matches[$i]['pickban_pending'] = !$locked;
+        }
+
         View::render('tournaments/show', [
             'title' => ($tournament['name'] ?? 'Tournoi') . ' | DuelDesk',
             'tournament' => $tournament,
@@ -431,5 +694,167 @@ final class TournamentController
         }
 
         return strlen($value);
+    }
+
+    /** @param array<string, string> $params */
+    public function live(array $params = []): void
+    {
+        $id = (int)($params['id'] ?? 0);
+        if ($id <= 0) {
+            Response::notFound();
+        }
+
+        $tRepo = new TournamentRepository();
+        $t = $tRepo->findById($id);
+        if ($t === null) {
+            Response::notFound();
+        }
+
+        $participantType = (string)($t['participant_type'] ?? 'solo');
+        $mRepo = new MatchRepository();
+        $matches = $participantType === 'team'
+            ? $mRepo->listTeamForTournament($id)
+            : $mRepo->listSoloForTournament($id);
+
+        $matchIds = [];
+        foreach ($matches as $m) {
+            $mid = (int)($m['id'] ?? 0);
+            if ($mid > 0) {
+                $matchIds[] = $mid;
+            }
+        }
+
+        $pbByMatchId = [];
+        if ($matchIds !== []) {
+            $pbRepo = new PickBanRepository();
+            $pbByMatchId = $pbRepo->listStatesByMatchIds($matchIds);
+        }
+
+        $rulesetJson = is_string($t['ruleset_json'] ?? null) ? trim((string)$t['ruleset_json']) : '';
+        $cfgByBo = [];
+        if ($rulesetJson !== '') {
+            $parsed = PickBanEngine::parseTournamentRuleset($rulesetJson);
+            $ruleset = $parsed['ruleset'] ?? null;
+            if (is_array($ruleset)) {
+                foreach ([1, 3, 5, 7, 9] as $bo) {
+                    $cfgByBo[$bo] = PickBanEngine::buildMatchConfigSnapshot($ruleset, $bo);
+                }
+            }
+        }
+
+        $out = [];
+        foreach ($matches as $m) {
+            $mid = (int)($m['id'] ?? 0);
+            if ($mid <= 0) {
+                continue;
+            }
+
+            $st = (string)($m['status'] ?? 'pending');
+            $score1 = (int)($m['score1'] ?? 0);
+            $score2 = (int)($m['score2'] ?? 0);
+            $scheduledAt = is_string($m['scheduled_at'] ?? null) ? (string)$m['scheduled_at'] : '';
+            $bestOf = (int)($m['best_of'] ?? 0);
+            if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+                $bestOf = (int)($t['best_of_default'] ?? 3);
+            }
+            if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
+                $bestOf = 3;
+            }
+
+            $reportedScore1 = $m['reported_score1'] ?? null;
+            $reportedScore2 = $m['reported_score2'] ?? null;
+            $reportedWinnerSlot = $m['reported_winner_slot'] ?? null;
+            $reportedByUsername = (string)($m['reported_by_username'] ?? '');
+            $reportedAt = is_string($m['reported_at'] ?? null) ? (string)$m['reported_at'] : '';
+
+            $counterScore1 = $m['counter_reported_score1'] ?? null;
+            $counterScore2 = $m['counter_reported_score2'] ?? null;
+            $counterWinnerSlot = $m['counter_reported_winner_slot'] ?? null;
+            $counterByUsername = (string)($m['counter_reported_by_username'] ?? '');
+            $counterAt = is_string($m['counter_reported_at'] ?? null) ? (string)$m['counter_reported_at'] : '';
+
+            if ($participantType === 'team') {
+                $aId = $m['team1_id'] !== null ? (int)$m['team1_id'] : null;
+                $bId = $m['team2_id'] !== null ? (int)$m['team2_id'] : null;
+                $aName = (string)($m['t1_name'] ?? '');
+                $bName = (string)($m['t2_name'] ?? '');
+                $win = $m['winner_team_id'] !== null ? (int)$m['winner_team_id'] : null;
+            } else {
+                $aId = $m['player1_id'] !== null ? (int)$m['player1_id'] : null;
+                $bId = $m['player2_id'] !== null ? (int)$m['player2_id'] : null;
+                $aName = (string)($m['p1_name'] ?? '');
+                $bName = (string)($m['p2_name'] ?? '');
+                $win = $m['winner_id'] !== null ? (int)$m['winner_id'] : null;
+            }
+
+            $aLabel = $aId === null
+                ? (($bId !== null && $win !== null && $win === $bId) ? 'BYE' : 'TBD')
+                : ($aName !== '' ? $aName : '#');
+            $bLabel = $bId === null
+                ? (($aId !== null && $win !== null && $win === $aId) ? 'BYE' : 'TBD')
+                : ($bName !== '' ? $bName : '#');
+
+            $aWin = $win !== null && $aId !== null && $win === $aId;
+            $bWin = $win !== null && $bId !== null && $win === $bId;
+            $winnerSlot = $aWin ? 1 : ($bWin ? 2 : 0);
+
+            $matchComplete = $aId !== null && $bId !== null;
+            $isReported = in_array($st, ['reported', 'disputed'], true)
+                && $matchComplete
+                && ($reportedScore1 !== null) && ($reportedScore2 !== null);
+            $showScores = (($st === 'confirmed') && $matchComplete) || $isReported;
+            $cardS1 = $showScores ? ($isReported ? (string)(int)$reportedScore1 : (string)$score1) : '-';
+            $cardS2 = $showScores ? ($isReported ? (string)(int)$reportedScore2 : (string)$score2) : '-';
+
+            $required = false;
+            $pending = false;
+            if ($rulesetJson !== '' && $matchComplete && !in_array($st, ['confirmed', 'void'], true)) {
+                $required = array_key_exists($bestOf, $cfgByBo) && is_array($cfgByBo[$bestOf]);
+                if ($required) {
+                    $state = $pbByMatchId[$mid] ?? null;
+                    $locked = is_array($state) && ((string)($state['status'] ?? 'running')) === 'locked';
+                    $pending = !$locked;
+                }
+            }
+
+            $out[] = [
+                'id' => $mid,
+                'status' => $st,
+                'best_of' => $bestOf,
+                'scheduled_at' => $scheduledAt,
+                'score1' => $score1,
+                'score2' => $score2,
+                'winner_slot' => $winnerSlot,
+                'a_label' => $aLabel,
+                'b_label' => $bLabel,
+                'a_empty' => $aId === null,
+                'b_empty' => $bId === null,
+                'card_s1' => $cardS1,
+                'card_s2' => $cardS2,
+                'reported_score1' => $reportedScore1 !== null ? (int)$reportedScore1 : null,
+                'reported_score2' => $reportedScore2 !== null ? (int)$reportedScore2 : null,
+                'reported_winner_slot' => $reportedWinnerSlot !== null ? (int)$reportedWinnerSlot : null,
+                'reported_by_username' => $reportedByUsername,
+                'reported_at' => $reportedAt,
+                'counter_reported_score1' => $counterScore1 !== null ? (int)$counterScore1 : null,
+                'counter_reported_score2' => $counterScore2 !== null ? (int)$counterScore2 : null,
+                'counter_reported_winner_slot' => $counterWinnerSlot !== null ? (int)$counterWinnerSlot : null,
+                'counter_reported_by_username' => $counterByUsername,
+                'counter_reported_at' => $counterAt,
+                'pickban_required' => $required,
+                'pickban_pending' => $pending,
+            ];
+        }
+
+        http_response_code(200);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'ok' => true,
+            'tournament_id' => $id,
+            'participant_type' => $participantType,
+            'matches' => $out,
+            'generated_at' => gmdate('c'),
+        ], JSON_UNESCAPED_SLASHES);
+        exit;
     }
 }

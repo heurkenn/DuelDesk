@@ -39,6 +39,20 @@ final class TournamentTeamRepository
         return (int)$stmt->fetchColumn();
     }
 
+    public function findSeed(int $tournamentId, int $teamId): ?int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT seed FROM tournament_teams WHERE tournament_id = :tid AND team_id = :team_id LIMIT 1'
+        );
+        $stmt->execute(['tid' => $tournamentId, 'team_id' => $teamId]);
+        $v = $stmt->fetchColumn();
+        if ($v === false || $v === null) {
+            return null;
+        }
+        $n = (int)$v;
+        return $n > 0 ? $n : null;
+    }
+
     public function isTeamInTournament(int $tournamentId, int $teamId): bool
     {
         $stmt = $this->pdo->prepare(
