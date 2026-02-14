@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   username VARCHAR(80) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role ENUM('user','admin') NOT NULL DEFAULT 'user',
+  role ENUM('user','admin','super_admin') NOT NULL DEFAULT 'user',
   discord_user_id VARCHAR(32) NULL,
   discord_username VARCHAR(64) NULL,
   discord_global_name VARCHAR(64) NULL,

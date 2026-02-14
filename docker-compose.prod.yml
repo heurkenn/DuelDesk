@@ -5,6 +5,7 @@ services:
   # - no direct HTTP port exposure (Caddy will expose 80/443)
   caddy:
     image: caddy:2-alpine
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
@@ -20,11 +21,38 @@ services:
 
   nginx:
     ports: [] # only reachable from caddy on the docker network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  php:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "php -r \"echo 'ok';\" >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  discord-bot:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"process.exit(0)\" >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   db:
     ports: [] # never expose MariaDB publicly in prod
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -p$$MARIADB_ROOT_PASSWORD >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
 volumes:
   caddy_data:
   caddy_config:
-

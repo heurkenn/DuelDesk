@@ -25,7 +25,8 @@ final class BotApiController
 
         $uRepo = new UserRepository();
         $u = $uRepo->findByDiscordUserId($discordUserId);
-        if (!is_array($u) || ((string)($u['role'] ?? 'user')) !== 'admin') {
+        $role = is_array($u) ? (string)($u['role'] ?? 'user') : 'user';
+        if (!is_array($u) || !in_array($role, ['admin', 'super_admin'], true)) {
             $this->json(403, ['ok' => false, 'error' => 'Forbidden']);
         }
 

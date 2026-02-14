@@ -28,16 +28,16 @@ use DuelDesk\Support\Auth;
 
     <div class="hero__panel">
         <div class="stat">
-            <div class="stat__label">Mode</div>
-            <div class="stat__value">Prototype</div>
+            <div class="stat__label">Formats</div>
+            <div class="stat__value">SE / DE / RR</div>
         </div>
         <div class="stat">
-            <div class="stat__label">Stack</div>
-            <div class="stat__value">PHP + JS + SQL</div>
+            <div class="stat__label">LAN</div>
+            <div class="stat__value">Multi-tournois</div>
         </div>
         <div class="stat">
-            <div class="stat__label">Nom</div>
-            <div class="stat__value">DuelDesk</div>
+            <div class="stat__label">Discord</div>
+            <div class="stat__value">OAuth + Bot</div>
         </div>
     </div>
 </section>
@@ -46,7 +46,7 @@ use DuelDesk\Support\Auth;
     <section class="card">
         <div class="card__header">
             <h2 class="card__title">Base de donnees non initialisee</h2>
-            <p class="card__subtitle">Il manque probablement la migration SQL.</p>
+            <p class="card__subtitle">Il manque probablement l'initialisation de la base de donnees.</p>
         </div>
         <div class="card__body">
             <div class="codeblock">

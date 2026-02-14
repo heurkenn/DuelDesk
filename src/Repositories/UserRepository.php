@@ -58,7 +58,15 @@ final class UserRepository
 
     public function countAdmins(): int
     {
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM users WHERE role = 'admin'");
+        // "Admins" includes super_admin for permission checks and UI constraints.
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM users WHERE role IN ('admin','super_admin')");
+        $stmt->execute();
+        return (int)$stmt->fetchColumn();
+    }
+
+    public function countSuperAdmins(): int
+    {
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM users WHERE role = 'super_admin'");
         $stmt->execute();
         return (int)$stmt->fetchColumn();
     }
@@ -146,6 +154,12 @@ final class UserRepository
     {
         $stmt = $this->pdo->prepare('UPDATE users SET role = :role WHERE id = :id');
         $stmt->execute(['role' => $role, 'id' => $id]);
+    }
+
+    public function deleteById(int $id): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM users WHERE id = :id');
+        $stmt->execute(['id' => $id]);
     }
 
     public function linkDiscord(int $id, string $discordUserId, string $discordUsername, string $discordGlobalName, string $discordAvatar): void

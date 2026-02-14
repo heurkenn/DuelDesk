@@ -72,7 +72,7 @@ final class AdminController
     /** @param array<string, string> $params */
     public function updateRole(array $params = []): void
     {
-        Auth::requireAdmin();
+        Auth::requireSuperAdmin();
 
         if (!Csrf::validate($_POST['csrf_token'] ?? null)) {
             Response::badRequest('Invalid CSRF token');
@@ -97,21 +97,54 @@ final class AdminController
         }
 
         $meId = Auth::id() ?? 0;
-        if ($id === $meId && $role !== 'admin') {
-            Flash::set('error', 'Tu ne peux pas retirer ton propre role admin.');
+        if ($id === $meId) {
+            Flash::set('error', "Tu ne peux pas modifier ton propre role.");
             Response::redirect('/admin/users');
         }
 
-        if (($target['role'] ?? '') === 'admin' && $role !== 'admin') {
-            $admins = $repo->countAdmins();
-            if ($admins <= 1) {
-                Flash::set('error', 'Impossible: il faut au moins 1 admin.');
-                Response::redirect('/admin/users');
-            }
+        if (((string)($target['role'] ?? 'user')) === 'super_admin') {
+            Flash::set('error', 'Impossible: role super_admin non modifiable.');
+            Response::redirect('/admin/users');
         }
 
         $repo->setRole($id, $role);
         Flash::set('success', 'Role mis a jour.');
+        Response::redirect('/admin/users');
+    }
+
+    /** @param array<string, string> $params */
+    public function deleteUser(array $params = []): void
+    {
+        Auth::requireSuperAdmin();
+
+        if (!Csrf::validate($_POST['csrf_token'] ?? null)) {
+            Response::badRequest('Invalid CSRF token');
+        }
+        Csrf::rotate();
+
+        $id = (int)($params['id'] ?? 0);
+        if ($id <= 0) {
+            Response::badRequest('Invalid user id');
+        }
+
+        $meId = Auth::id() ?? 0;
+        if ($id === $meId) {
+            Flash::set('error', 'Tu ne peux pas supprimer ton propre compte.');
+            Response::redirect('/admin/users');
+        }
+
+        $repo = new UserRepository();
+        $target = $repo->findById($id);
+        if ($target === null) {
+            Response::notFound();
+        }
+        if (((string)($target['role'] ?? 'user')) === 'super_admin') {
+            Flash::set('error', 'Impossible: suppression super_admin interdite.');
+            Response::redirect('/admin/users');
+        }
+
+        $repo->deleteById($id);
+        Flash::set('success', 'Utilisateur supprime.');
         Response::redirect('/admin/users');
     }
 }

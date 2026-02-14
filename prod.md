@@ -83,6 +83,12 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 docker compose exec php php bin/migrate.php
 ```
 
+Ou via le helper:
+
+```bash
+bin/prod.sh up
+```
+
 Optionnel demo:
 
 ```bash
@@ -109,6 +115,6 @@ docker compose up -d --build discord-bot
 - `APP_ENV=prod`
 - `BOT_API_TOKEN` secret fort
 - DB non exposee
+- Uploads hors webroot: les fichiers sont stockes dans `storage/uploads` et servis via `/uploads/...` par nginx.
 - Sauvegardes DB (a automatiser)
-- CSP: on a une CSP baseline compatible inline; pour durcir il faudra supprimer les `<script>` inline.
-
+- CSP: `script-src 'self'` (pas d'inline scripts). Il reste `style-src 'unsafe-inline'` tant qu'on utilise des `style=""` inline.

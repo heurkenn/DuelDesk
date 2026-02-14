@@ -109,8 +109,8 @@ final class AuthController
             return;
         }
 
-        // Bootstrap: if there is no admin yet, the first registered user becomes admin.
-        $role = $repo->countAdmins() === 0 ? 'admin' : 'user';
+        // Bootstrap: first registered user becomes super_admin (if none exists yet).
+        $role = $repo->countSuperAdmins() === 0 ? 'super_admin' : 'user';
 
         $hash = password_hash($password, PASSWORD_DEFAULT);
         if (!is_string($hash) || $hash === '') {
@@ -129,13 +129,19 @@ final class AuthController
             // Ignore rate limit storage failures.
         }
 
-        Flash::set('success', $role === 'admin' ? 'Compte admin cree.' : 'Compte cree.');
+        if ($role === 'super_admin') {
+            Flash::set('success', 'Compte super admin cree.');
+        } elseif ($role === 'admin') {
+            Flash::set('success', 'Compte admin cree.');
+        } else {
+            Flash::set('success', 'Compte cree.');
+        }
 
         if ($redirect !== '' && str_starts_with($redirect, '/')) {
             Response::redirect($redirect);
         }
 
-        Response::redirect($role === 'admin' ? '/admin' : '/');
+        Response::redirect(in_array($role, ['admin', 'super_admin'], true) ? '/admin' : '/');
     }
 
     /** @param array<string, string> $params */
@@ -246,7 +252,7 @@ final class AuthController
         $dest = '/';
         if ($redirect !== '' && str_starts_with($redirect, '/')) {
             $dest = $redirect;
-        } elseif (($user['role'] ?? '') === 'admin') {
+        } elseif (in_array((string)($user['role'] ?? ''), ['admin', 'super_admin'], true)) {
             $dest = '/admin';
         }
 

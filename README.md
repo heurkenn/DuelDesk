@@ -52,7 +52,7 @@ sudo -E RESET_DB=1 ./test.sh
 
 ## Auth / Admin
 
-- `/register` : inscription (le **premier** compte cree devient **admin** automatiquement si aucun admin n'existe)
+- `/register` : inscription (le **premier** compte cree devient **super_admin** automatiquement si aucun super_admin n'existe)
 - `/login` : connexion
 - `/admin` : dashboard admin
 - `/admin/users` : gestion des roles (admin/user)
@@ -80,3 +80,4 @@ Variables (voir `.env.example`) :
 Voir `prod.md`:
 - `docker-compose.prod.yml` (Caddy TLS + pas d'exposition DB/nginx)
 - variables `.env` a changer (APP_URL, Discord redirect, BOT_PUBLIC_URL, secrets)
+- helper: `bin/prod.sh up`

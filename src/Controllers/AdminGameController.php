@@ -13,6 +13,21 @@ use DuelDesk\View;
 
 final class AdminGameController
 {
+    private function uploadsAbsDir(string $relative): string
+    {
+        $relative = '/' . ltrim($relative, '/');
+        return DUELDESK_ROOT . '/storage' . $relative;
+    }
+
+    private function uploadsAbsPathFromUrl(string $urlPath): string
+    {
+        $urlPath = (string)$urlPath;
+        if ($urlPath === '' || !str_starts_with($urlPath, '/uploads/')) {
+            return '';
+        }
+        return DUELDESK_ROOT . '/storage' . $urlPath;
+    }
+
     /** @param array<string, string> $params */
     public function index(array $params = []): void
     {
@@ -87,7 +102,7 @@ final class AdminGameController
         $slug = $repo->uniqueSlug($name);
         $filename = $slug . $req['ext'];
 
-        $absDir = DUELDESK_ROOT . '/public/uploads/games';
+        $absDir = $this->uploadsAbsDir('/uploads/games');
         if (!is_dir($absDir) && !@mkdir($absDir, 0775, true)) {
             Response::badRequest('Upload: dossier non accessible.');
         }
@@ -215,7 +230,10 @@ final class AdminGameController
                 Response::badRequest('Chemin image invalide.');
             }
 
-            $absPath = DUELDESK_ROOT . '/public' . $imagePath;
+            $absPath = $this->uploadsAbsPathFromUrl($imagePath);
+            if ($absPath === '') {
+                Response::badRequest('Chemin image invalide.');
+            }
             $absDir = dirname($absPath);
 
             if (!is_dir($absDir) && !@mkdir($absDir, 0775, true)) {
@@ -271,7 +289,7 @@ final class AdminGameController
         $repo->delete($id);
 
         if ($imagePath !== '' && str_starts_with($imagePath, '/uploads/games/')) {
-            $absPath = DUELDESK_ROOT . '/public' . $imagePath;
+            $absPath = $this->uploadsAbsPathFromUrl($imagePath);
             if (is_file($absPath)) {
                 @unlink($absPath);
             }

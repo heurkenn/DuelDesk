@@ -4,9 +4,9 @@ services:
     ports:
       - "8080:80"
     volumes:
-      # Nginx only needs the public/ tree + uploads.
+      # Nginx only needs the public/ tree + uploads (served via /uploads).
       - ./public:/var/www/html/public:ro
-      - uploads_data:/var/www/html/public/uploads:ro
+      - uploads_data:/var/www/html/storage/uploads:ro
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - php
@@ -16,7 +16,7 @@ services:
       context: ./docker/php
     volumes:
       - ./:/var/www/html
-      - uploads_data:/var/www/html/public/uploads
+      - uploads_data:/var/www/html/storage/uploads
     environment:
       APP_ENV: ${APP_ENV:-dev}
       APP_URL: ${APP_URL:-http://localhost:8080}

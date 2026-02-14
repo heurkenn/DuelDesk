@@ -46,7 +46,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 
 ### Ce qui a ete fait
 - Inscription/connexion basees sur `username` + `password`.
-- Premier compte cree devient admin si aucun admin n'existe.
+- Premier compte cree devient super_admin si aucun super_admin n'existe.
 - CSRF tokens + rotation.
 
 ### Fichiers touches

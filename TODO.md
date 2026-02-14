@@ -96,7 +96,7 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 ## Admin / Roles
 
 - [ ] Roles plus fins:
-- [ ] `super_admin` (site)
+- [x] `super_admin` (site)
 - [ ] `organizer` (par tournoi)
 - [ ] `moderator` (par tournoi)
 - [ ] Tournois:

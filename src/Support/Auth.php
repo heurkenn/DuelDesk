@@ -53,7 +53,14 @@ final class Auth
     public static function isAdmin(): bool
     {
         $u = self::user();
-        return is_array($u) && (($u['role'] ?? '') === 'admin');
+        $role = is_array($u) ? (string)($u['role'] ?? 'user') : 'user';
+        return $role === 'admin' || $role === 'super_admin';
+    }
+
+    public static function isSuperAdmin(): bool
+    {
+        $u = self::user();
+        return is_array($u) && ((string)($u['role'] ?? 'user') === 'super_admin');
     }
 
     public static function login(int $userId): void
@@ -89,6 +96,17 @@ final class Auth
 
         if (!self::isAdmin()) {
             Response::forbidden('Acces reserve aux administrateurs.');
+        }
+    }
+
+    public static function requireSuperAdmin(): void
+    {
+        if (!self::check()) {
+            self::requireLogin();
+        }
+
+        if (!self::isSuperAdmin()) {
+            Response::forbidden('Acces reserve au super admin.');
         }
     }
 }

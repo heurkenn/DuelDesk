@@ -27,6 +27,7 @@ function nav_is_active(string $currentPath, string $prefix): bool
 $me = Auth::user();
 $isAuthed = $me !== null;
 $isAdmin = Auth::isAdmin();
+$isSuperAdmin = Auth::isSuperAdmin();
 $csrfToken = Csrf::token();
 $discordAvatarUrl = '';
 if (is_array($me)) {
@@ -100,7 +101,11 @@ try {
                             <span class="userchip__dot" aria-hidden="true"></span>
                         <?php endif; ?>
                         <span class="userchip__name"><?= View::e((string)($me['username'] ?? 'compte')) ?></span>
-                        <?php if ($isAdmin): ?><span class="pill pill--soft">admin</span><?php endif; ?>
+                        <?php if ($isSuperAdmin): ?>
+                            <span class="pill pill--soft">super</span>
+                        <?php elseif ($isAdmin): ?>
+                            <span class="pill pill--soft">admin</span>
+                        <?php endif; ?>
                     </span>
 
                     <a class="btn btn--ghost" href="/account">Compte</a>
@@ -126,8 +131,8 @@ try {
 
     <footer class="footer">
         <div class="footer__inner">
-            <span class="footer__muted">DuelDesk</span>
-            <span class="footer__muted">Prototype PHP/JS/SQL</span>
+            <span class="footer__muted">&copy; 2026</span>
+            <span class="footer__muted">@heurk3nnn</span>
         </div>
     </footer>
 

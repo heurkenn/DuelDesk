@@ -42,6 +42,7 @@ $router->post('/account/discord/disconnect', [AccountController::class, 'discord
 $router->get('/admin', [AdminController::class, 'index']);
 $router->get('/admin/users', [AdminController::class, 'users']);
 $router->post('/admin/users/{id:\\d+}/role', [AdminController::class, 'updateRole']);
+$router->post('/admin/users/{id:\\d+}/delete', [AdminController::class, 'deleteUser']);
 $router->get('/admin/games', [AdminGameController::class, 'index']);
 $router->post('/admin/games', [AdminGameController::class, 'create']);
 $router->get('/admin/games/{id:\\d+}', [AdminGameController::class, 'edit']);

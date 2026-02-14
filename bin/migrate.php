@@ -91,4 +91,18 @@ foreach ($files as $file) {
     }
 }
 
+// Post-migrate hardening / compatibility:
+// When using a squashed schema, CREATE TABLE IF NOT EXISTS won't evolve existing columns.
+// Apply minimal ALTERs for forward-compatible upgrades.
+try {
+    $col = $pdo->query("SHOW COLUMNS FROM users LIKE 'role'")->fetch(PDO::FETCH_ASSOC);
+    $type = is_array($col) ? (string)($col['Type'] ?? '') : '';
+    if ($type !== '' && !str_contains($type, 'super_admin')) {
+        fwrite(STDOUT, "Upgrading users.role enum to include super_admin...\n");
+        $pdo->exec("ALTER TABLE users MODIFY role ENUM('user','admin','super_admin') NOT NULL DEFAULT 'user'");
+    }
+} catch (Throwable) {
+    // Best-effort: ignore if table doesn't exist yet or permissions are restricted.
+}
+
 fwrite(STDOUT, $ran === 0 ? "Nothing to do.\n" : "Done. Applied {$ran} migration(s).\n");

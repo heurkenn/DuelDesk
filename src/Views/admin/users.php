@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use DuelDesk\View;
+use DuelDesk\Support\Auth;
 
 /** @var list<array<string, mixed>> $users */
 /** @var string $csrfToken */
@@ -28,7 +29,7 @@ function admin_users_page_link(int $page, string $query): string
 <div class="pagehead">
     <div>
         <h1 class="pagehead__title">Utilisateurs</h1>
-        <p class="pagehead__lead">Gestion des roles (admin / user).</p>
+        <p class="pagehead__lead">Roles: super_admin / admin / user.</p>
     </div>
     <div class="pagehead__actions">
         <form method="get" action="/admin/users" class="inline">
@@ -58,8 +59,8 @@ function admin_users_page_link(int $page, string $query): string
                 $id = (int)($u['id'] ?? 0);
                 $role = (string)($u['role'] ?? 'user');
                 $isMe = $id === $meId;
-                $isLastAdmin = ($role === 'admin' && $adminCount <= 1);
-                $lockRole = $isMe || $isLastAdmin;
+                $isSuper = ($role === 'super_admin');
+                $canManage = Auth::isSuperAdmin() && !$isMe && !$isSuper;
             ?>
             <tr>
                 <td class="table__strong">
@@ -67,22 +68,34 @@ function admin_users_page_link(int $page, string $query): string
                     <?php if ($isMe): ?>
                         <span class="pill pill--soft">toi</span>
                     <?php endif; ?>
+                    <?php if ($isSuper): ?>
+                        <span class="pill">super</span>
+                    <?php endif; ?>
                 </td>
                 <td>
-                    <form method="post" action="/admin/users/<?= $id ?>/role" class="inline">
-                        <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
-                        <select class="select select--compact" name="role" <?= $lockRole ? 'disabled' : '' ?>>
-                            <option value="user" <?= $role === 'user' ? 'selected' : '' ?>>user</option>
-                            <option value="admin" <?= $role === 'admin' ? 'selected' : '' ?>>admin</option>
-                        </select>
-                        <button class="btn btn--ghost btn--compact" type="submit" <?= $lockRole ? 'disabled' : '' ?>>Appliquer</button>
-                        <?php if ($isLastAdmin): ?>
-                            <span class="muted">dernier admin</span>
-                        <?php endif; ?>
-                    </form>
+                    <?php if ($role === 'super_admin'): ?>
+                        <span class="pill">super_admin</span>
+                    <?php else: ?>
+                        <form method="post" action="/admin/users/<?= $id ?>/role" class="inline">
+                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                            <select class="select select--compact" name="role" <?= $canManage ? '' : 'disabled' ?>>
+                                <option value="user" <?= $role === 'user' ? 'selected' : '' ?>>user</option>
+                                <option value="admin" <?= $role === 'admin' ? 'selected' : '' ?>>admin</option>
+                            </select>
+                            <button class="btn btn--ghost btn--compact" type="submit" <?= $canManage ? '' : 'disabled' ?>>Appliquer</button>
+                        </form>
+                    <?php endif; ?>
                 </td>
                 <td><?= View::e((string)($u['created_at'] ?? '')) ?></td>
-                <td class="table__right"><span class="muted">#<?= $id ?></span></td>
+                <td class="table__right">
+                    <?php if (Auth::isSuperAdmin() && !$isMe && !$isSuper): ?>
+                        <form method="post" action="/admin/users/<?= $id ?>/delete" class="inline" data-confirm="Supprimer cet utilisateur definitivement ?">
+                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                            <button class="btn btn--ghost btn--compact" type="submit">Supprimer</button>
+                        </form>
+                    <?php endif; ?>
+                    <span class="muted">#<?= $id ?></span>
+                </td>
             </tr>
         <?php endforeach; ?>
         </tbody>

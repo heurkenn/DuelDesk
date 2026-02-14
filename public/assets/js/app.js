@@ -1,6 +1,182 @@
 (() => {
   document.documentElement.classList.add('js');
 
+  const setupRulesetBuilder = () => {
+    const tplEl = document.getElementById('ddRulesetTemplates');
+    if (!(tplEl instanceof HTMLElement)) return;
+
+    let templates = null;
+    try {
+      templates = JSON.parse(tplEl.textContent || 'null');
+    } catch {
+      templates = null;
+    }
+    if (!templates || typeof templates !== 'object') return;
+
+    const poolBody = document.querySelector('[data-ruleset-pool]');
+    const addMapBtn = document.querySelector('[data-ruleset-add-map]');
+    const tplMap = document.getElementById('tplRulesetMapRow');
+
+    const addMapRow = () => {
+      if (!(poolBody instanceof HTMLElement)) return;
+      if (!(tplMap instanceof HTMLTemplateElement)) return;
+      const node = tplMap.content.firstElementChild?.cloneNode(true);
+      if (!(node instanceof HTMLElement)) return;
+      poolBody.appendChild(node);
+    };
+
+    if (addMapBtn instanceof HTMLButtonElement) {
+      addMapBtn.addEventListener('click', addMapRow);
+    }
+
+    const addStepBtnEls = Array.from(document.querySelectorAll('[data-ruleset-add-step]'));
+    const tplStep = document.getElementById('tplRulesetStepRow');
+
+    const addStepRow = (bo) => {
+      const body = document.querySelector(`[data-ruleset-steps="${CSS.escape(String(bo))}"]`);
+      if (!(body instanceof HTMLElement)) return;
+      if (!(tplStep instanceof HTMLTemplateElement)) return;
+
+      const row = tplStep.content.firstElementChild?.cloneNode(true);
+      if (!(row instanceof HTMLElement)) return;
+
+      const selects = Array.from(row.querySelectorAll('select'));
+      const actionSel = selects[0];
+      const actorSel = selects[1];
+      if (actionSel instanceof HTMLSelectElement) {
+        actionSel.name = `steps[${bo}][action][]`;
+      }
+      if (actorSel instanceof HTMLSelectElement) {
+        actorSel.name = `steps[${bo}][actor][]`;
+      }
+
+      body.appendChild(row);
+    };
+
+    for (const btn of addStepBtnEls) {
+      if (!(btn instanceof HTMLButtonElement)) continue;
+      const bo = btn.getAttribute('data-ruleset-add-step') || '';
+      btn.addEventListener('click', () => addStepRow(bo));
+    }
+
+    document.addEventListener('click', (e) => {
+      const t = e.target instanceof Element ? e.target : null;
+      if (!t) return;
+
+      const rm = t.closest('[data-row-remove]');
+      if (rm instanceof HTMLButtonElement) {
+        const tr = rm.closest('tr');
+        if (tr) tr.remove();
+        return;
+      }
+
+      const up = t.closest('[data-row-up]');
+      if (up instanceof HTMLButtonElement) {
+        const tr = up.closest('tr');
+        if (!tr) return;
+        const prev = tr.previousElementSibling;
+        if (prev) prev.before(tr);
+        return;
+      }
+
+      const down = t.closest('[data-row-down]');
+      if (down instanceof HTMLButtonElement) {
+        const tr = down.closest('tr');
+        if (!tr) return;
+        const next = tr.nextElementSibling;
+        if (next) next.after(tr);
+        return;
+      }
+    });
+
+    const tplSelect = document.getElementById('rulesetTemplateSelect');
+    const tplLoad = document.getElementById('rulesetTemplateLoad');
+
+    const clearBody = (body) => {
+      if (!(body instanceof HTMLElement)) return;
+      while (body.firstChild) body.removeChild(body.firstChild);
+    };
+
+    const setInput = (el, value) => {
+      if (!(el instanceof HTMLInputElement)) return;
+      el.value = value || '';
+    };
+
+    const loadTemplate = (id) => {
+      const tpl = templates[id];
+      if (!tpl || typeof tpl !== 'object') return;
+
+      clearBody(poolBody);
+      if (Array.isArray(tpl.pool)) {
+        for (const m of tpl.pool) {
+          if (!m || typeof m !== 'object') continue;
+          addMapRow();
+          const last = poolBody instanceof HTMLElement ? poolBody.lastElementChild : null;
+          if (!(last instanceof HTMLElement)) continue;
+          const inputs = Array.from(last.querySelectorAll('input'));
+          setInput(inputs[0], String(m.key || ''));
+          setInput(inputs[1], String(m.name || ''));
+        }
+      }
+
+      const stepsByBo = tpl.steps_by_best_of || {};
+      for (const bo of [1, 3, 5]) {
+        const body = document.querySelector(`[data-ruleset-steps="${bo}"]`);
+        clearBody(body);
+
+        const seq = stepsByBo[String(bo)];
+        if (!Array.isArray(seq)) continue;
+
+        const normalizeStep = (s) => {
+          if (typeof s === 'string') {
+            const action = String(s || '').toLowerCase().trim();
+            return { action, actor: action === 'decider' ? 'any' : 'alternate' };
+          }
+          if (s && typeof s === 'object') {
+            const action = String(s.action || s.step || '').toLowerCase().trim();
+            const actor = String(s.actor || s.by || '').toLowerCase().trim();
+            return { action, actor };
+          }
+          return null;
+        };
+
+        const seq2 = [];
+        for (const s of seq) {
+          const st = normalizeStep(s);
+          if (!st) continue;
+          if (st.action === 'decider' || !st.action) continue;
+          if (st.action !== 'ban' && st.action !== 'pick') continue;
+          if (!st.actor || st.actor === 'any') st.actor = 'alternate';
+          if (st.actor !== 'starter' && st.actor !== 'other' && st.actor !== 'alternate') st.actor = 'alternate';
+          seq2.push(st);
+        }
+
+        for (let i = 0; i < seq2.length; i++) {
+          addStepRow(bo);
+          const last = body instanceof HTMLElement ? body.lastElementChild : null;
+          if (!(last instanceof HTMLElement)) continue;
+
+          const actionSel = last.querySelector('select[name^="steps"]');
+          const actorSel = last.querySelector('select[name*="[actor]"]');
+          if (actionSel instanceof HTMLSelectElement) {
+            actionSel.value = String(seq2[i].action || 'ban');
+          }
+          if (actorSel instanceof HTMLSelectElement) {
+            actorSel.value = String(seq2[i].actor || ((i % 2 === 0) ? 'starter' : 'other'));
+          }
+        }
+      }
+    };
+
+    if (tplLoad instanceof HTMLButtonElement) {
+      tplLoad.addEventListener('click', () => {
+        const id = (tplSelect instanceof HTMLSelectElement) ? (tplSelect.value || '') : '';
+        if (!id) return;
+        loadTemplate(id);
+      });
+    }
+  };
+
   const isVisible = (el) => {
     if (!(el instanceof Element)) return false;
     return !!(el.getClientRects().length && (el instanceof HTMLElement ? (el.offsetWidth || el.offsetHeight) : true));
@@ -559,6 +735,9 @@
       }
     });
   };
+
+  // Init.
+  setupRulesetBuilder();
 
   const setupDropLinesToggle = () => {
     document.addEventListener('click', (e) => {
