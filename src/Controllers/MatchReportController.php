@@ -46,11 +46,23 @@ final class MatchReportController
         }
 
         $participantType = (string)($t['participant_type'] ?? 'solo');
+        $teamMatchMode = (string)($t['team_match_mode'] ?? 'standard');
+        if (!in_array($teamMatchMode, ['standard', 'lineup_duels'], true)) {
+            $teamMatchMode = 'standard';
+        }
 
         $mRepo = new MatchRepository();
         $match = $mRepo->findById($matchId);
         if (!is_array($match) || (int)($match['tournament_id'] ?? 0) !== $tournamentId) {
             Response::notFound();
+        }
+
+        if ($participantType === 'team' && in_array($teamMatchMode, ['lineup_duels', 'multi_round'], true)) {
+            $msg = $teamMatchMode === 'multi_round'
+                ? "Ce tournoi utilise le mode 'multi-round': ajoute les rounds puis finalise sur la page match."
+                : "Ce tournoi utilise le mode 'lineup': reporte les duels sur la page match.";
+            Flash::set('error', $msg);
+            Response::redirect('/tournaments/' . $tournamentId . '/matches/' . $matchId);
         }
 
         $st = (string)($match['status'] ?? 'pending');

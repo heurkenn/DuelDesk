@@ -53,7 +53,9 @@ use DuelDesk\Support\Auth;
                 <code>docker compose up -d --build</code><br>
                 <code>docker compose exec php php bin/migrate.php</code>
             </div>
-            <p class="muted">Details (dev): <?= View::e($dbError) ?></p>
+            <?php if ((getenv('APP_ENV') ?: 'dev') === 'dev'): ?>
+                <p class="muted">Details (dev): <?= View::e($dbError) ?></p>
+            <?php endif; ?>
         </div>
     </section>
 <?php endif; ?>

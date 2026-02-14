@@ -45,4 +45,20 @@ final class PlayerRepository
 
         return $this->createForUser($userId, $handle);
     }
+
+    public function findUserIdByPlayerId(int $playerId): ?int
+    {
+        if ($playerId <= 0) {
+            return null;
+        }
+
+        $stmt = $this->pdo->prepare('SELECT user_id FROM players WHERE id = :pid LIMIT 1');
+        $stmt->execute(['pid' => $playerId]);
+        $v = $stmt->fetchColumn();
+        if ($v === false || $v === null) {
+            return null;
+        }
+        $id = (int)$v;
+        return $id > 0 ? $id : null;
+    }
 }

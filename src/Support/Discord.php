@@ -6,6 +6,43 @@ namespace DuelDesk\Support;
 
 final class Discord
 {
+    public static function avatarCdnUrl(string $discordUserId, string $discordAvatarHash, int $size = 64): ?string
+    {
+        $discordUserId = trim($discordUserId);
+        $discordAvatarHash = trim($discordAvatarHash);
+
+        if ($discordUserId === '' || $discordAvatarHash === '') {
+            return null;
+        }
+
+        if (!ctype_digit($discordUserId)) {
+            return null;
+        }
+
+        // Typical hash is 32 chars, sometimes animated: a_xxx.
+        if (!preg_match('/^(?:a_)?[a-zA-Z0-9]{2,64}$/', $discordAvatarHash)) {
+            return null;
+        }
+
+        if ($size < 16) {
+            $size = 16;
+        }
+        if ($size > 256) {
+            $size = 256;
+        }
+
+        $ext = str_starts_with($discordAvatarHash, 'a_') ? 'gif' : 'png';
+
+        return 'https://cdn.discordapp.com/avatars/'
+            . rawurlencode($discordUserId)
+            . '/'
+            . rawurlencode($discordAvatarHash)
+            . '.'
+            . $ext
+            . '?size='
+            . $size;
+    }
+
     public static function botToken(): string
     {
         return trim((string)(getenv('DISCORD_BOT_TOKEN') ?: ''));
@@ -154,4 +191,3 @@ final class Discord
         return is_string($raw) && $raw !== '' && $http >= 200 && $http < 300;
     }
 }
-

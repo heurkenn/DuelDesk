@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use DuelDesk\View;
+use DuelDesk\Support\Discord;
 
 /** @var array<string, mixed> $me */
 /** @var string $csrfToken */
@@ -11,6 +12,8 @@ use DuelDesk\View;
 $discordId = (string)($me['discord_user_id'] ?? '');
 $discordUsername = (string)($me['discord_username'] ?? '');
 $discordGlobalName = (string)($me['discord_global_name'] ?? '');
+$discordAvatarHash = (string)($me['discord_avatar'] ?? '');
+$discordAvatarUrl = $discordId !== '' ? (Discord::avatarCdnUrl($discordId, $discordAvatarHash, 96) ?? '') : '';
 ?>
 
 <div class="pagehead">
@@ -45,7 +48,12 @@ $discordGlobalName = (string)($me['discord_global_name'] ?? '');
 
     <div class="card">
         <div class="card__header">
-            <div class="card__title">Discord</div>
+            <div class="card__title">
+                Discord
+                <?php if ($discordAvatarUrl !== ''): ?>
+                    <img class="gameicon" src="<?= View::e($discordAvatarUrl) ?>" alt="" loading="lazy" width="22" height="22" referrerpolicy="no-referrer" style="margin-left: 10px; border-radius: 999px;">
+                <?php endif; ?>
+            </div>
             <?php if (!$discordConfigured): ?>
                 <div class="pill pill--soft">non configure</div>
             <?php elseif ($discordId !== ''): ?>
@@ -89,4 +97,3 @@ $discordGlobalName = (string)($me['discord_global_name'] ?? '');
         </div>
     </div>
 </section>
-

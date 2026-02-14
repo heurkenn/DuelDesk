@@ -42,6 +42,15 @@ final class TournamentTeamController
             Response::badRequest('Not a team tournament');
         }
 
+        $me = Auth::user();
+        if (!Auth::isAdmin()) {
+            $discordUserId = is_array($me) ? trim((string)($me['discord_user_id'] ?? '')) : '';
+            if ($discordUserId === '') {
+                Flash::set('error', 'Connexion Discord requise: lie ton compte avant de rejoindre un tournoi.');
+                Response::redirect('/account');
+            }
+        }
+
         $status = (string)($t['status'] ?? 'draft');
         $isOpen = in_array($status, ['published', 'running'], true);
         if (!$isOpen && !Auth::isAdmin()) {
@@ -105,7 +114,6 @@ final class TournamentTeamController
         $ttRepo->add($tournamentId, $teamId);
 
         try {
-            $me = Auth::user();
             $discordUserId = is_array($me) ? trim((string)($me['discord_user_id'] ?? '')) : '';
             if ($discordUserId !== '') {
                 Discord::tryAutoRoleOnSignup($discordUserId);
@@ -141,6 +149,15 @@ final class TournamentTeamController
 
         if (($t['participant_type'] ?? 'solo') !== 'team') {
             Response::badRequest('Not a team tournament');
+        }
+
+        $me = Auth::user();
+        if (!Auth::isAdmin()) {
+            $discordUserId = is_array($me) ? trim((string)($me['discord_user_id'] ?? '')) : '';
+            if ($discordUserId === '') {
+                Flash::set('error', 'Connexion Discord requise: lie ton compte avant de rejoindre un tournoi.');
+                Response::redirect('/account');
+            }
         }
 
         $status = (string)($t['status'] ?? 'draft');
@@ -213,7 +230,6 @@ final class TournamentTeamController
         $tmRepo->addMember($teamId, $meId, 'member');
 
         try {
-            $me = Auth::user();
             $discordUserId = is_array($me) ? trim((string)($me['discord_user_id'] ?? '')) : '';
             if ($discordUserId !== '') {
                 Discord::tryAutoRoleOnSignup($discordUserId);

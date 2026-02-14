@@ -49,6 +49,8 @@ final class DemoSeeder
 
         $sf6 = $this->ensureGame('Street Fighter 6', $imgW, $imgH, [96, 165, 250, 255]);
         $cs2 = $this->ensureGame('Counter-Strike 2', $imgW, $imgH, [251, 191, 36, 255]);
+        $x2ko = $this->ensureGame('2XKO', $imgW, $imgH, [236, 72, 153, 255]);
+        $fg = $this->ensureGame('Fall Guys', $imgW, $imgH, [0, 203, 255, 255]);
 
         // 1) Solo double elim (8 players)
         $tSolo = $this->ensureTournament(
@@ -93,11 +95,43 @@ final class DemoSeeder
         $this->ensureTournamentRulesetTemplate($tCs2, 'cs2');
         $this->ensureGenerated($tCs2, 'double_elim', 'team');
 
+        // 4) 2XKO crew battle (4 teams, 2 per team) - lineup duels
+        $t2xko = $this->ensureTournament(
+            'Demo 2XKO Crew (2v2, 4 equipes)',
+            $adminId,
+            (int)$x2ko['id'],
+            (string)$x2ko['name'],
+            'single_elim',
+            'team',
+            2,
+            'published',
+            'lineup_duels'
+        );
+        $this->seedTeams($t2xko, 4, 2, 'dd_2xko_', $pwHash, '2XKO');
+        $this->ensureGenerated($t2xko, 'single_elim', 'team');
+
+        // 5) Fall Guys multi-round points (2 teams, 5 per team)
+        $tFg = $this->ensureTournament(
+            'Demo Fall Guys Multi-round (5v5, 2 equipes)',
+            $adminId,
+            (int)$fg['id'],
+            (string)$fg['name'],
+            'single_elim',
+            'team',
+            5,
+            'published',
+            'multi_round'
+        );
+        $this->seedTeams($tFg, 2, 5, 'dd_fg_', $pwHash, 'FG');
+        $this->ensureGenerated($tFg, 'single_elim', 'team');
+
         fwrite(STDOUT, "\nSeed done.\n");
         fwrite(STDOUT, "Tournois:\n");
         fwrite(STDOUT, " - /tournaments/{$tSolo} (solo DE, users dd_solo_01..08)\n");
         fwrite(STDOUT, " - /tournaments/{$tTeam} (team DE 2v2, users dd_team2_01..16)\n");
         fwrite(STDOUT, " - /tournaments/{$tCs2} (CS2 team DE 5v5, users dd_cs2_01..20)\n");
+        fwrite(STDOUT, " - /tournaments/{$t2xko} (2XKO crew 2v2, users dd_2xko_01..08)\n");
+        fwrite(STDOUT, " - /tournaments/{$tFg} (Fall Guys multi-round 5v5, users dd_fg_01..10)\n");
         fwrite(STDOUT, "Admin demo user: dd_admin (role admin)\n");
         fwrite(STDOUT, "Password for all demo users: password123\n");
     }
@@ -156,7 +190,8 @@ final class DemoSeeder
         string $format,
         string $participantType,
         ?int $teamSize,
-        string $status
+        string $status,
+        string $teamMatchMode = 'standard'
     ): int
     {
         $stmt = $this->pdo->prepare('SELECT id FROM tournaments WHERE name = :name LIMIT 1');
@@ -167,7 +202,7 @@ final class DemoSeeder
             return $id;
         }
 
-        return $this->tRepo->create($ownerUserId, $gameId, $gameName, $name, $format, $participantType, $teamSize, $status, null);
+        return $this->tRepo->create($ownerUserId, $gameId, $gameName, $name, $format, $participantType, $teamSize, $teamMatchMode, $status, null);
     }
 
     private function seedSoloPlayers(int $tournamentId, string $prefix, int $count, string $pwHash): void

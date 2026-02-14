@@ -39,10 +39,18 @@ if (is_dir($logDir) && is_writable($logDir)) {
 }
 
 session_name('dueldesk');
+// NOTE: behind a reverse proxy, HTTPS might be terminated upstream.
+$isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+if (!$isHttps) {
+    $xfp = strtolower(trim((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')));
+    if ($xfp === 'https') {
+        $isHttps = true;
+    }
+}
 session_set_cookie_params([
     'httponly' => true,
     'samesite' => 'Lax',
-    'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+    'secure' => $isHttps,
 ]);
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();

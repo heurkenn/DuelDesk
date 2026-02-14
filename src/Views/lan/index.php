@@ -32,6 +32,10 @@ use DuelDesk\Support\Auth;
                 $slug = (string)($e['slug'] ?? '');
                 $href = $slug !== '' ? ('/lan/' . $slug) : '#';
                 $status = (string)($e['status'] ?? 'draft');
+                $ptype = (string)($e['participant_type'] ?? 'solo');
+                if (!in_array($ptype, ['solo', 'team'], true)) {
+                    $ptype = 'solo';
+                }
                 $startsAt = is_string($e['starts_at'] ?? null) ? (string)$e['starts_at'] : '';
                 $startsAtPretty = '';
                 if ($startsAt !== '') {
@@ -47,6 +51,8 @@ use DuelDesk\Support\Auth;
                 </div>
                 <div class="card__body">
                     <div class="meta">
+                        <span class="meta__item">Type: <?= View::e($ptype === 'team' ? 'Equipe' : 'Solo') ?></span>
+                        <span class="meta__dot" aria-hidden="true"></span>
                         <?php if ($startsAtPretty !== ''): ?>
                             <span class="meta__item">Debut: <?= View::e($startsAtPretty) ?></span>
                         <?php else: ?>
@@ -62,4 +68,3 @@ use DuelDesk\Support\Auth;
         <?php endforeach; ?>
     </div>
 <?php endif; ?>
-

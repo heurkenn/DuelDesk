@@ -1,0 +1,30 @@
+services:
+  # In production we recommend running DuelDesk behind a TLS reverse proxy (Caddy/Traefik).
+  # This compose file is an override for tighter defaults:
+  # - no public DB port
+  # - no direct HTTP port exposure (Caddy will expose 80/443)
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Used by Caddyfile (string replacement pattern).
+      APP_DOMAIN: ${APP_DOMAIN:-example.com}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - nginx
+
+  nginx:
+    ports: [] # only reachable from caddy on the docker network
+
+  db:
+    ports: [] # never expose MariaDB publicly in prod
+
+volumes:
+  caddy_data:
+  caddy_config:
+

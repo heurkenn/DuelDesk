@@ -18,6 +18,7 @@ use DuelDesk\Repositories\TournamentRepository;
 use DuelDesk\Repositories\TournamentTeamRepository;
 use DuelDesk\Services\BracketGenerator;
 use DuelDesk\Services\PickBanEngine;
+use DuelDesk\Services\MatchResultService;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
 use DuelDesk\Support\Discord;
@@ -43,91 +44,155 @@ final class AdminTournamentController
             Response::notFound();
         }
 
+        $tab = (string)($_GET['tab'] ?? 'participants');
+        if (!in_array($tab, ['participants', 'matches', 'settings', 'audit'], true)) {
+            $tab = 'participants';
+        }
+
+        $teamMatchMode = (string)($t['team_match_mode'] ?? 'standard');
+        if (!in_array($teamMatchMode, ['standard', 'lineup_duels', 'multi_round'], true)) {
+            $teamMatchMode = 'standard';
+        }
+
+        $matchModeWarning = null;
+        if (((string)($t['participant_type'] ?? 'solo')) === 'team' && in_array($teamMatchMode, ['lineup_duels', 'multi_round'], true)) {
+            $matchModeWarning = $teamMatchMode === 'multi_round'
+                ? "Ce tournoi est en mode multi-round: finalise les matchs depuis la page match."
+                : "Ce tournoi est en mode lineup (crew battle): confirme les duels depuis la page match.";
+        }
+
         $participantType = (string)($t['participant_type'] ?? 'solo');
 
-        $players = [];
-        $teams = [];
-        $teamMembers = [];
-
-        if ($participantType === 'team') {
-            $ttRepo = new TournamentTeamRepository();
-            $teams = $ttRepo->listForTournament($tournamentId);
-
-            $teamIds = [];
-            foreach ($teams as $row) {
-                $id = (int)($row['team_id'] ?? 0);
-                if ($id > 0) {
-                    $teamIds[] = $id;
-                }
-            }
-
-            $tmRepo = new TeamMemberRepository();
-            $teamMembers = $tmRepo->listMembersForTeams($teamIds);
-        } else {
-            $tpRepo = new TournamentPlayerRepository();
-            $players = $tpRepo->listForTournament($tournamentId);
-        }
+        $players = [];      // participants tab only
+        $teams = [];        // participants tab only
+        $teamMembers = [];  // participants tab only
 
         $mRepo = new MatchRepository();
         $matchCount = $mRepo->countForTournament($tournamentId);
+        $confirmedCount = $mRepo->countConfirmedForTournament($tournamentId);
         $format = (string)($t['format'] ?? 'single_elim');
-        $participantCount = $participantType === 'team' ? count($teams) : count($players);
-        $supportedFormat = in_array($format, ['single_elim', 'double_elim', 'round_robin'], true);
-        $canGenerateBracket = $supportedFormat && ($matchCount === 0) && ($participantCount >= 2);
 
         $incompleteTeams = [];
-        if ($participantType === 'team') {
-            $teamSize = (int)($t['team_size'] ?? 0);
-            if ($teamSize < 2) {
-                $teamSize = 2;
-            }
+        $matches = [];      // matches tab only
+        $auditLogs = [];    // audit tab only
+        $games = [];        // settings tab only
+        $lanEvents = [];    // settings tab only
+        $rulesets = [];     // settings tab only
 
-            foreach ($teams as $row) {
-                $id = (int)($row['team_id'] ?? 0);
-                if ($id <= 0) {
-                    continue;
+        $supportedFormat = in_array($format, ['single_elim', 'double_elim', 'round_robin'], true);
+        $participantCount = 0;
+        if ($participantType === 'team') {
+            $ttRepo = new TournamentTeamRepository();
+            $participantCount = $ttRepo->countForTournament($tournamentId);
+        } else {
+            $tpRepo = new TournamentPlayerRepository();
+            $participantCount = $tpRepo->countForTournament($tournamentId);
+        }
+        $canGenerateBracket = $supportedFormat && ($matchCount === 0) && ($participantCount >= 2);
+
+        if ($tab === 'participants') {
+            if ($participantType === 'team') {
+                $ttRepo = new TournamentTeamRepository();
+                $teams = $ttRepo->listForTournament($tournamentId);
+
+                $teamIds = [];
+                foreach ($teams as $row) {
+                    $id = (int)($row['team_id'] ?? 0);
+                    if ($id > 0) {
+                        $teamIds[] = $id;
+                    }
                 }
 
-                $count = count($teamMembers[$id] ?? []);
-                if ($count < $teamSize) {
-                    $name = (string)($row['name'] ?? ('#' . $id));
-                    $incompleteTeams[] = "{$name} ({$count}/{$teamSize})";
-                    if (count($incompleteTeams) >= 5) {
-                        break;
+                $tmRepo = new TeamMemberRepository();
+                $teamMembers = $tmRepo->listMembersForTeams($teamIds);
+
+                $teamSize = (int)($t['team_size'] ?? 0);
+                if ($teamSize < 2) {
+                    $teamSize = 2;
+                }
+
+                foreach ($teams as $row) {
+                    $id = (int)($row['team_id'] ?? 0);
+                    if ($id <= 0) {
+                        continue;
+                    }
+
+                    $count = count($teamMembers[$id] ?? []);
+                    if ($count < $teamSize) {
+                        $name = (string)($row['name'] ?? ('#' . $id));
+                        $incompleteTeams[] = "{$name} ({$count}/{$teamSize})";
+                        if (count($incompleteTeams) >= 5) {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                $tpRepo = new TournamentPlayerRepository();
+                $players = $tpRepo->listForTournament($tournamentId);
+            }
+        } elseif ($tab === 'matches') {
+            if ($participantType === 'team' && $matchCount === 0) {
+                $ttRepo = new TournamentTeamRepository();
+                $teams = $ttRepo->listForTournament($tournamentId);
+
+                $teamIds = [];
+                foreach ($teams as $row) {
+                    $id = (int)($row['team_id'] ?? 0);
+                    if ($id > 0) {
+                        $teamIds[] = $id;
+                    }
+                }
+
+                $tmRepo = new TeamMemberRepository();
+                $teamMembers = $tmRepo->listMembersForTeams($teamIds);
+
+                $teamSize = (int)($t['team_size'] ?? 0);
+                if ($teamSize < 2) {
+                    $teamSize = 2;
+                }
+
+                foreach ($teams as $row) {
+                    $id = (int)($row['team_id'] ?? 0);
+                    if ($id <= 0) {
+                        continue;
+                    }
+
+                    $count = count($teamMembers[$id] ?? []);
+                    if ($count < $teamSize) {
+                        $name = (string)($row['name'] ?? ('#' . $id));
+                        $incompleteTeams[] = "{$name} ({$count}/{$teamSize})";
+                        if (count($incompleteTeams) >= 5) {
+                            break;
+                        }
                     }
                 }
             }
 
-            if ($incompleteTeams !== []) {
-                $canGenerateBracket = false;
+            $matches = $participantType === 'team'
+                ? $mRepo->listTeamForTournament($tournamentId)
+                : $mRepo->listSoloForTournament($tournamentId);
+        } elseif ($tab === 'audit') {
+            $aRepo = new AuditLogRepository();
+            $auditLogs = $aRepo->listForTournament($tournamentId, 120);
+        } else { // settings
+            $gRepo = new GameRepository();
+            $games = $gRepo->all();
+
+            $lanRepo = new LanEventRepository();
+            $lanEvents = $lanRepo->listForSelect();
+
+            $gameId = $t['game_id'] ?? null;
+            $gameId = (is_int($gameId) || is_string($gameId)) ? (int)$gameId : 0;
+            if ($gameId > 0) {
+                $rRepo = new RulesetRepository();
+                $rulesets = $rRepo->listAll($gameId);
             }
-        }
-
-        $matches = $participantType === 'team'
-            ? $mRepo->listTeamForTournament($tournamentId)
-            : $mRepo->listSoloForTournament($tournamentId);
-
-        $aRepo = new AuditLogRepository();
-        $auditLogs = $aRepo->listForTournament($tournamentId, 80);
-
-        $confirmedCount = $mRepo->countConfirmedForTournament($tournamentId);
-
-        $gRepo = new GameRepository();
-        $games = $gRepo->all();
-
-        $lanRepo = new LanEventRepository();
-        $lanEvents = $lanRepo->listForSelect();
-
-        $rulesets = [];
-        $gameId = $t['game_id'] ?? null;
-        $gameId = (is_int($gameId) || is_string($gameId)) ? (int)$gameId : 0;
-        if ($gameId > 0) {
-            $rRepo = new RulesetRepository();
-            $rulesets = $rRepo->listAll($gameId);
         }
 
         View::render('admin/tournament', [
             'title' => 'Gerer le tournoi | Admin | DuelDesk',
+            'activeTab' => $tab,
+            'matchModeWarning' => $matchModeWarning,
             'tournament' => $t,
             'players' => $players,
             'teams' => $teams,
@@ -178,6 +243,7 @@ final class AdminTournamentController
         $format = (string)($_POST['format'] ?? ($t['format'] ?? 'single_elim'));
         $participantType = (string)($_POST['participant_type'] ?? ($t['participant_type'] ?? 'solo'));
         $teamSizeRaw = trim((string)($_POST['team_size'] ?? ($t['team_size'] !== null ? (string)(int)$t['team_size'] : '')));
+        $teamMatchMode = trim((string)($_POST['team_match_mode'] ?? ($t['team_match_mode'] ?? 'standard')));
 
         if ($name === '' || $this->strlenSafe($name) > 120) {
             Flash::set('error', 'Nom requis (max 120).');
@@ -217,6 +283,12 @@ final class AdminTournamentController
             }
         }
 
+        $teamMatchMode = $participantType === 'team' ? $teamMatchMode : 'standard';
+        if ($participantType === 'team' && !in_array($teamMatchMode, ['standard', 'lineup_duels', 'multi_round'], true)) {
+            Flash::set('error', "Mode d'equipe invalide.");
+            Response::redirect('/admin/tournaments/' . $tournamentId);
+        }
+
         $lanEventId = null;
         if ($lanEventIdRaw !== '') {
             if (!ctype_digit($lanEventIdRaw)) {
@@ -228,8 +300,18 @@ final class AdminTournamentController
                 $lanEventId = null;
             } else {
                 $lanRepo = new LanEventRepository();
-                if ($lanRepo->findById($lanEventId) === null) {
+                $lan = $lanRepo->findById($lanEventId);
+                if ($lan === null) {
                     Flash::set('error', 'LAN introuvable.');
+                    Response::redirect('/admin/tournaments/' . $tournamentId);
+                }
+
+                $lanType = (string)($lan['participant_type'] ?? 'solo');
+                if (!in_array($lanType, ['solo', 'team'], true)) {
+                    $lanType = 'solo';
+                }
+                if ($lanType !== $participantType) {
+                    Flash::set('error', "Type incompatible: LAN={$lanType}, tournoi={$participantType}.");
                     Response::redirect('/admin/tournaments/' . $tournamentId);
                 }
             }
@@ -242,13 +324,16 @@ final class AdminTournamentController
         $oldFormat = (string)($t['format'] ?? 'single_elim');
         $oldParticipantType = (string)($t['participant_type'] ?? 'solo');
         $oldTeamSize = $t['team_size'] !== null ? (int)$t['team_size'] : null;
+        $oldTeamMatchMode = (string)($t['team_match_mode'] ?? 'standard');
 
         $structureChanged = ($format !== $oldFormat)
             || ($participantType !== $oldParticipantType)
             || ($participantType === 'team' && $teamSize !== $oldTeamSize)
             || ($participantType !== 'team' && $oldParticipantType === 'team');
 
-        if ($confirmedCount > 0 && $structureChanged) {
+        $modeChanged = ($teamMatchMode !== $oldTeamMatchMode);
+
+        if ($confirmedCount > 0 && ($structureChanged || $modeChanged)) {
             Flash::set('error', 'Configuration verrouillee: des matchs ont deja ete confirmes.');
             Response::redirect('/admin/tournaments/' . $tournamentId);
         }
@@ -292,6 +377,7 @@ final class AdminTournamentController
             $format,
             $participantType,
             $teamSize,
+            $teamMatchMode,
             $lanEventId
         );
 
@@ -301,6 +387,7 @@ final class AdminTournamentController
             'format' => $format,
             'participant_type' => $participantType,
             'team_size' => $teamSize,
+            'team_match_mode' => $teamMatchMode,
             'lan_event_id' => $lanEventId,
             'bracket_reset' => $didReset,
         ]);
@@ -1165,44 +1252,6 @@ final class AdminTournamentController
             Response::redirect('/admin/tournaments/' . $tournamentId);
         }
 
-        // Best-of validation (soft): if scores look like a series (<= BO), enforce "first to X wins".
-        $bestOf = (int)($match['best_of'] ?? 0);
-        if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
-            $bestOf = (int)($t['best_of_default'] ?? 3);
-        }
-        if (!in_array($bestOf, [1, 3, 5, 7, 9], true)) {
-            $bestOf = 3;
-        }
-
-        $winsToTake = intdiv($bestOf, 2) + 1;
-        $looksLikeSeries = ($score1 <= $bestOf) && ($score2 <= $bestOf);
-
-        // Always require winner to have a strictly higher score.
-        if ($winnerSlot === '1' && $score1 <= $score2) {
-            Flash::set('error', 'Score incoherent: winner=A mais scoreA <= scoreB.');
-            Response::redirect('/admin/tournaments/' . $tournamentId);
-        }
-        if ($winnerSlot === '2' && $score2 <= $score1) {
-            Flash::set('error', 'Score incoherent: winner=B mais scoreB <= scoreA.');
-            Response::redirect('/admin/tournaments/' . $tournamentId);
-        }
-
-        // If it looks like a BO series, require majority wins.
-        if ($looksLikeSeries) {
-            if ($winnerSlot === '1' && $score1 !== $winsToTake) {
-                Flash::set('error', "Score BO{$bestOf} incoherent: il faut {$winsToTake} victoire(s) pour gagner.");
-                Response::redirect('/admin/tournaments/' . $tournamentId);
-            }
-            if ($winnerSlot === '2' && $score2 !== $winsToTake) {
-                Flash::set('error', "Score BO{$bestOf} incoherent: il faut {$winsToTake} victoire(s) pour gagner.");
-                Response::redirect('/admin/tournaments/' . $tournamentId);
-            }
-            if ($score1 >= $winsToTake && $score2 >= $winsToTake) {
-                Flash::set('error', "Score BO{$bestOf} incoherent: les deux cotes ne peuvent pas atteindre {$winsToTake}.");
-                Response::redirect('/admin/tournaments/' . $tournamentId);
-            }
-        }
-
         $bracket = (string)($match['bracket'] ?? 'winners');
         $round = (int)($match['round'] ?? 0);
         $roundPos = (int)($match['round_pos'] ?? 0);
@@ -1210,48 +1259,13 @@ final class AdminTournamentController
             Flash::set('error', 'Match invalide.');
             Response::redirect('/admin/tournaments/' . $tournamentId);
         }
-
-        $pdo = Db::pdo();
-        $pdo->beginTransaction();
-
         try {
-            if ($participantType === 'team') {
-                $a = $match['team1_id'] !== null ? (int)$match['team1_id'] : null;
-                $b = $match['team2_id'] !== null ? (int)$match['team2_id'] : null;
-                if ($a === null || $b === null) {
-                    throw new \RuntimeException('Match incomplet (TBD).');
-                }
-
-                $winnerTeamId = ($winnerSlot === '1') ? $a : $b;
-                $loserTeamId = ($winnerSlot === '1') ? $b : $a;
-                $mRepo->confirmTeamResult($matchId, $score1, $score2, $winnerTeamId);
-
-                if ($format === 'double_elim') {
-                    $this->advanceTeamDoubleElim($mRepo, $tournamentId, $bracket, $round, $roundPos, $winnerTeamId, $loserTeamId);
-                } elseif ($format === 'single_elim') {
-                    $this->advanceTeamWinner($mRepo, $tournamentId, $bracket, $round, $roundPos, $winnerTeamId);
-                }
-            } else {
-                $a = $match['player1_id'] !== null ? (int)$match['player1_id'] : null;
-                $b = $match['player2_id'] !== null ? (int)$match['player2_id'] : null;
-                if ($a === null || $b === null) {
-                    throw new \RuntimeException('Match incomplet (TBD).');
-                }
-
-                $winnerPlayerId = ($winnerSlot === '1') ? $a : $b;
-                $loserPlayerId = ($winnerSlot === '1') ? $b : $a;
-                $mRepo->confirmSoloResult($matchId, $score1, $score2, $winnerPlayerId);
-
-                if ($format === 'double_elim') {
-                    $this->advanceSoloDoubleElim($mRepo, $tournamentId, $bracket, $round, $roundPos, $winnerPlayerId, $loserPlayerId);
-                } elseif ($format === 'single_elim') {
-                    $this->advanceSoloWinner($mRepo, $tournamentId, $bracket, $round, $roundPos, $winnerPlayerId);
-                }
-            }
-
-            $pdo->commit();
+            $svc = new MatchResultService();
+            $res = $svc->confirmAndAdvance($t, $match, $score1, $score2, (int)$winnerSlot, requirePickbanLocked: false);
+            $bracket = (string)($res['bracket'] ?? $bracket);
+            $round = (int)($res['round'] ?? $round);
+            $roundPos = (int)($res['round_pos'] ?? $roundPos);
         } catch (Throwable $e) {
-            $pdo->rollBack();
             Flash::set('error', $e->getMessage());
             Response::redirect('/admin/tournaments/' . $tournamentId);
         }

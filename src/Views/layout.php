@@ -5,6 +5,7 @@ declare(strict_types=1);
 use DuelDesk\View;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
+use DuelDesk\Support\Discord;
 
 $path = (string)(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/');
 if ($path !== '/') {
@@ -27,6 +28,12 @@ $me = Auth::user();
 $isAuthed = $me !== null;
 $isAdmin = Auth::isAdmin();
 $csrfToken = Csrf::token();
+$discordAvatarUrl = '';
+if (is_array($me)) {
+    $did = is_string($me['discord_user_id'] ?? null) ? (string)$me['discord_user_id'] : '';
+    $dav = is_string($me['discord_avatar'] ?? null) ? (string)$me['discord_avatar'] : '';
+    $discordAvatarUrl = Discord::avatarCdnUrl($did, $dav, 48) ?? '';
+}
 
 // Cache-bust assets (nginx sets long cache headers).
 $cssVer = '';
@@ -87,7 +94,11 @@ try {
 
                 <?php if ($isAuthed): ?>
                     <span class="userchip" title="<?= View::e((string)($me['username'] ?? '')) ?>">
-                        <span class="userchip__dot" aria-hidden="true"></span>
+                        <?php if ($discordAvatarUrl !== ''): ?>
+                            <img class="userchip__avatar" src="<?= View::e($discordAvatarUrl) ?>" alt="" loading="lazy" width="18" height="18" referrerpolicy="no-referrer">
+                        <?php else: ?>
+                            <span class="userchip__dot" aria-hidden="true"></span>
+                        <?php endif; ?>
                         <span class="userchip__name"><?= View::e((string)($me['username'] ?? 'compte')) ?></span>
                         <?php if ($isAdmin): ?><span class="pill pill--soft">admin</span><?php endif; ?>
                     </span>

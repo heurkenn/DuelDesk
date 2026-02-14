@@ -29,14 +29,14 @@ final class LanEventRepository
         return $stmt->fetchAll();
     }
 
-    /** @return list<array{id:int,name:string,slug:string,status:string,starts_at:mixed,ends_at:mixed,location:mixed,created_at:mixed}> */
+    /** @return list<array{id:int,name:string,slug:string,participant_type:string,status:string,starts_at:mixed,ends_at:mixed,location:mixed,created_at:mixed}> */
     public function listForSelect(): array
     {
         $stmt = $this->pdo->query(
-            'SELECT id, name, slug, status, starts_at, ends_at, location, created_at'
+            'SELECT id, name, slug, participant_type, status, starts_at, ends_at, location, created_at'
             . ' FROM lan_events ORDER BY created_at DESC, name ASC'
         );
-        /** @var list<array{id:int,name:string,slug:string,status:string,starts_at:mixed,ends_at:mixed,location:mixed,created_at:mixed}> */
+        /** @var list<array{id:int,name:string,slug:string,participant_type:string,status:string,starts_at:mixed,ends_at:mixed,location:mixed,created_at:mixed}> */
         return $stmt->fetchAll();
     }
 
@@ -61,6 +61,7 @@ final class LanEventRepository
     public function create(
         ?int $ownerUserId,
         string $name,
+        string $participantType = 'solo',
         string $status = 'draft',
         ?string $startsAt = null,
         ?string $endsAt = null,
@@ -71,13 +72,14 @@ final class LanEventRepository
         $slug = $this->uniqueSlug($name);
 
         $stmt = $this->pdo->prepare(
-            'INSERT INTO lan_events (owner_user_id, name, slug, status, starts_at, ends_at, location, description)'
-            . ' VALUES (:owner_user_id, :name, :slug, :status, :starts_at, :ends_at, :location, :description)'
+            'INSERT INTO lan_events (owner_user_id, name, slug, participant_type, status, starts_at, ends_at, location, description)'
+            . ' VALUES (:owner_user_id, :name, :slug, :participant_type, :status, :starts_at, :ends_at, :location, :description)'
         );
         $stmt->execute([
             'owner_user_id' => $ownerUserId,
             'name' => $name,
             'slug' => $slug,
+            'participant_type' => $participantType,
             'status' => $status,
             'starts_at' => $startsAt,
             'ends_at' => $endsAt,
@@ -91,6 +93,7 @@ final class LanEventRepository
     public function update(
         int $id,
         string $name,
+        string $participantType,
         string $status,
         ?string $startsAt = null,
         ?string $endsAt = null,
@@ -100,12 +103,13 @@ final class LanEventRepository
     {
         $stmt = $this->pdo->prepare(
             'UPDATE lan_events'
-            . ' SET name = :name, status = :status, starts_at = :starts_at, ends_at = :ends_at, location = :location, description = :description'
+            . ' SET name = :name, participant_type = :participant_type, status = :status, starts_at = :starts_at, ends_at = :ends_at, location = :location, description = :description'
             . ' WHERE id = :id'
         );
         $stmt->execute([
             'id' => $id,
             'name' => $name,
+            'participant_type' => $participantType,
             'status' => $status,
             'starts_at' => $startsAt,
             'ends_at' => $endsAt,
@@ -149,4 +153,3 @@ final class LanEventRepository
         return (bool)$stmt->fetchColumn();
     }
 }
-

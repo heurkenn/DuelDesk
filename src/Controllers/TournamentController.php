@@ -31,7 +31,7 @@ final class TournamentController
         $page = (ctype_digit($pageRaw) && (int)$pageRaw > 0) ? (int)$pageRaw : 1;
         $perPage = 20;
 
-        $total = $repo->countSearch($query);
+        $total = $repo->countSearchPublic($query);
         $pages = max(1, (int)ceil($total / $perPage));
         if ($page > $pages) {
             $page = $pages;
@@ -39,7 +39,7 @@ final class TournamentController
 
         View::render('tournaments/index', [
             'title' => 'Tournois | DuelDesk',
-            'tournaments' => $repo->searchPaged($query, $page, $perPage),
+            'tournaments' => $repo->searchPagedPublic($query, $page, $perPage),
             'query' => $query,
             'page' => $page,
             'pages' => $pages,
@@ -78,6 +78,7 @@ final class TournamentController
                 'format' => 'single_elim',
                 'participant_type' => 'solo',
                 'team_size' => '2',
+                'team_match_mode' => 'standard',
                 'max_entrants' => '',
                 'signup_closes_at' => '',
                 'best_of_default' => '3',
@@ -107,6 +108,7 @@ final class TournamentController
         $format = (string)($_POST['format'] ?? 'single_elim');
         $participantType = (string)($_POST['participant_type'] ?? 'solo');
         $teamSizeRaw = trim((string)($_POST['team_size'] ?? ''));
+        $teamMatchMode = trim((string)($_POST['team_match_mode'] ?? 'standard'));
         $maxEntrantsRaw = trim((string)($_POST['max_entrants'] ?? ''));
         $signupClosesAtRaw = (string)($_POST['signup_closes_at'] ?? '');
         $bestOfRaw = trim((string)($_POST['best_of_default'] ?? '3'));
@@ -122,6 +124,7 @@ final class TournamentController
             'format' => $format,
             'participant_type' => $participantType,
             'team_size' => $teamSizeRaw,
+            'team_match_mode' => $teamMatchMode,
             'max_entrants' => $maxEntrantsRaw,
             'signup_closes_at' => $signupClosesAtRaw,
             'best_of_default' => $bestOfRaw,
@@ -173,6 +176,12 @@ final class TournamentController
                     $errors['team_size'] = "Taille d'equipe invalide (2 a 16).";
                 }
             }
+        }
+
+        $teamMatchMode = $participantType === 'team' ? $teamMatchMode : 'standard';
+        $teamMatchModes = ['standard', 'lineup_duels', 'multi_round'];
+        if ($participantType === 'team' && !in_array($teamMatchMode, $teamMatchModes, true)) {
+            $errors['team_match_mode'] = "Mode d'equipe invalide.";
         }
 
         $maxEntrants = null;
@@ -239,8 +248,21 @@ final class TournamentController
                 $errors['lan_event_id'] = 'LAN invalide.';
             } else {
                 $lanEventId = (int)$lanEventIdRaw;
-                if ($lanEventId <= 0 || $lanRepo->findById($lanEventId) === null) {
+                if ($lanEventId <= 0) {
                     $errors['lan_event_id'] = 'LAN introuvable.';
+                } else {
+                    $lan = $lanRepo->findById($lanEventId);
+                    if ($lan === null) {
+                        $errors['lan_event_id'] = 'LAN introuvable.';
+                    } else {
+                        $lanType = (string)($lan['participant_type'] ?? 'solo');
+                        if (!in_array($lanType, ['solo', 'team'], true)) {
+                            $lanType = 'solo';
+                        }
+                        if ($lanType !== $participantType) {
+                            $errors['lan_event_id'] = "Type incompatible: LAN={$lanType}, tournoi={$participantType}.";
+                        }
+                    }
                 }
             }
         }
@@ -260,7 +282,7 @@ final class TournamentController
         $gameName = (string)$game['name'];
 
         $repo = new TournamentRepository();
-        $id = $repo->create(Auth::id(), $gameId, $gameName, $name, $format, $participantType, $teamSize, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault, $bestOfFinal, $pickbanStartMode, $lanEventId);
+        $id = $repo->create(Auth::id(), $gameId, $gameName, $name, $format, $participantType, $teamSize, $teamMatchMode, $status, $startsAt, $maxEntrants, $signupClosesAt, $bestOfDefault, $bestOfFinal, $pickbanStartMode, $lanEventId);
 
         Flash::set('success', 'Tournoi cree.');
         Response::redirect('/tournaments/' . $id);
@@ -280,6 +302,13 @@ final class TournamentController
             Response::notFound();
         }
 
+        // LAN tournaments should be accessed from their LAN context (public).
+        $lanSlug = is_string($tournament['lan_event_slug'] ?? null) ? trim((string)$tournament['lan_event_slug']) : '';
+        $tSlug = is_string($tournament['slug'] ?? null) ? trim((string)$tournament['slug']) : '';
+        if ($lanSlug !== '' && $tSlug !== '' && !Auth::isAdmin()) {
+            Response::redirect('/lan/' . $lanSlug . '/t/' . $tSlug);
+        }
+
         $this->renderShow($tournament);
     }
 
@@ -294,6 +323,43 @@ final class TournamentController
         $repo = new TournamentRepository();
         $tournament = $repo->findBySlug($slug);
         if ($tournament === null) {
+            Response::notFound();
+        }
+
+        // LAN tournaments have a canonical public URL under the LAN.
+        $lanSlug = is_string($tournament['lan_event_slug'] ?? null) ? trim((string)$tournament['lan_event_slug']) : '';
+        if ($lanSlug !== '') {
+            Response::redirect('/lan/' . $lanSlug . '/t/' . $slug);
+        }
+
+        $this->renderShow($tournament, true);
+    }
+
+    /** @param array<string, string> $params */
+    public function showInLan(array $params = []): void
+    {
+        $lanSlug = (string)($params['lanSlug'] ?? '');
+        $slug = (string)($params['slug'] ?? '');
+        if ($lanSlug === '' || $slug === '') {
+            Response::notFound();
+        }
+
+        $lanRepo = new LanEventRepository();
+        $lan = $lanRepo->findBySlug($lanSlug);
+        if ($lan === null) {
+            Response::notFound();
+        }
+
+        $repo = new TournamentRepository();
+        $tournament = $repo->findBySlug($slug);
+        if ($tournament === null) {
+            Response::notFound();
+        }
+
+        $expectedLanId = (int)($lan['id'] ?? 0);
+        $actualLanId = $tournament['lan_event_id'] ?? null;
+        $actualLanId = (is_int($actualLanId) || is_string($actualLanId)) ? (int)$actualLanId : 0;
+        if ($expectedLanId <= 0 || $actualLanId !== $expectedLanId) {
             Response::notFound();
         }
 
@@ -327,6 +393,27 @@ final class TournamentController
         }
 
         $canReport = false;
+        $teamMatchMode = (string)($tournament['team_match_mode'] ?? 'standard');
+        if (!in_array($teamMatchMode, ['standard', 'lineup_duels', 'multi_round'], true)) {
+            $teamMatchMode = 'standard';
+        }
+        $disableGenericReport = false;
+        $teamRoster1 = [];
+        $teamRoster2 = [];
+        $teamLineup1 = [];
+        $teamLineup2 = [];
+        $teamDuels = [];
+        $teamCanSetLineup1 = false;
+        $teamCanSetLineup2 = false;
+        $teamCanConfirmDuel = false;
+        $teamDuelWins1 = 0;
+        $teamDuelWins2 = 0;
+        $teamNeedsCaptainTiebreak = false;
+        $multiRounds = [];
+        $multiTotal1 = 0;
+        $multiTotal2 = 0;
+        $multiCanAddRound = false;
+        $multiCanFinalize = false;
         $pickbanMySlot = null;
         $pickbanRequired = false;
         $pickbanLocked = false;
@@ -349,6 +436,95 @@ final class TournamentController
             : ($match['player1_id'] !== null && $match['player2_id'] !== null);
 
         $status = (string)($match['status'] ?? 'pending');
+
+        // Team "lineup duels" (crew battle) mode: captains set an order, then confirm each duel.
+        if ($participantType === 'team' && $teamMatchMode === 'lineup_duels' && $matchComplete && !in_array($status, ['confirmed', 'void'], true)) {
+            $disableGenericReport = true;
+            $t1 = $match['team1_id'] !== null ? (int)$match['team1_id'] : 0;
+            $t2 = $match['team2_id'] !== null ? (int)$match['team2_id'] : 0;
+            if ($t1 > 0 && $t2 > 0) {
+                $tmRepo = new TeamMemberRepository();
+                $teamRoster1 = $tmRepo->listMembers($t1);
+                $teamRoster2 = $tmRepo->listMembers($t2);
+
+                $lineupRepo = new \DuelDesk\Repositories\MatchTeamLineupRepository();
+                $teamLineup1 = $lineupRepo->listLineup($matchId, 1);
+                $teamLineup2 = $lineupRepo->listLineup($matchId, 2);
+
+                // Auto-create regular duels once both lineups exist.
+                try {
+                    $svc = new \DuelDesk\Services\TeamMatchService();
+                    $svc->ensureRegularDuels($tournament, $match);
+                } catch (\Throwable) {
+                    // Best-effort; UI still works if duels aren't created yet.
+                }
+
+                $duelRepo = new \DuelDesk\Repositories\MatchTeamDuelRepository();
+                $teamDuels = $duelRepo->listDuels($matchId);
+                foreach ($teamDuels as $d) {
+                    if (!is_array($d)) continue;
+                    if ((string)($d['status'] ?? 'pending') !== 'confirmed') continue;
+                    $w = $d['winner_slot'] ?? null;
+                    $w = (is_int($w) || is_string($w)) ? (int)$w : 0;
+                    if ($w === 1) $teamDuelWins1++;
+                    if ($w === 2) $teamDuelWins2++;
+                }
+
+                // If regular duels done and tied, tiebreaker duel will be created (and must be confirmed).
+                $teamSize = (int)($tournament['team_size'] ?? 0);
+                if ($teamSize <= 0) $teamSize = 2;
+                $confirmedRegular = 0;
+                foreach ($teamDuels as $d) {
+                    if (!is_array($d)) continue;
+                    if ((string)($d['kind'] ?? '') !== 'regular') continue;
+                    if ((string)($d['status'] ?? 'pending') === 'confirmed') $confirmedRegular++;
+                }
+                if ($confirmedRegular >= $teamSize && $teamDuelWins1 === $teamDuelWins2) {
+                    $teamNeedsCaptainTiebreak = true;
+                }
+
+                if (Auth::check()) {
+                    $meId = Auth::id();
+                    if ($meId !== null) {
+                        $teamCanSetLineup1 = Auth::isAdmin() || $tmRepo->isCaptain($t1, $meId);
+                        $teamCanSetLineup2 = Auth::isAdmin() || $tmRepo->isCaptain($t2, $meId);
+                        $teamCanConfirmDuel = Auth::isAdmin()
+                            || $tmRepo->isCaptain($t1, $meId)
+                            || $tmRepo->isCaptain($t2, $meId);
+                    }
+                }
+
+                // In this mode, don't show the generic "report match score" form.
+                $canReport = false;
+            }
+        }
+
+        // Team "multi-round" points mode (Fall Guys-style).
+        if ($participantType === 'team' && $teamMatchMode === 'multi_round' && $matchComplete && !in_array($status, ['confirmed', 'void'], true)) {
+            $disableGenericReport = true;
+            $t1 = $match['team1_id'] !== null ? (int)$match['team1_id'] : 0;
+            $t2 = $match['team2_id'] !== null ? (int)$match['team2_id'] : 0;
+            if ($t1 > 0 && $t2 > 0) {
+                $rRepo = new \DuelDesk\Repositories\MatchRoundRepository();
+                $multiRounds = $rRepo->listForMatch($matchId);
+                foreach ($multiRounds as $r) {
+                    if (!is_array($r)) continue;
+                    $multiTotal1 += (int)($r['points1'] ?? 0);
+                    $multiTotal2 += (int)($r['points2'] ?? 0);
+                }
+
+                if (Auth::check()) {
+                    $meId = Auth::id();
+                    if ($meId !== null) {
+                        $tmRepo = new TeamMemberRepository();
+                        $multiCanAddRound = Auth::isAdmin() || $tmRepo->isCaptain($t1, $meId) || $tmRepo->isCaptain($t2, $meId);
+                        $multiCanFinalize = $multiCanAddRound;
+                    }
+                }
+
+                $canReport = false;
+            }
+        }
 
         // Determine if pick/ban is enabled for this match (depends on tournament ruleset + BO).
         $rulesetJson = is_string($tournament['ruleset_json'] ?? null) ? trim((string)$tournament['ruleset_json']) : '';
@@ -503,6 +679,9 @@ final class TournamentController
         if ($pickbanBlockingReport) {
             $canReport = false;
         }
+        if ($disableGenericReport) {
+            $canReport = false;
+        }
 
         if (is_array($pickbanComputed) && ($pickbanComputed['ok'] ?? false) && $pickbanMySlot !== null) {
             $nextStep = (string)($pickbanComputed['next_step'] ?? '');
@@ -517,6 +696,23 @@ final class TournamentController
             'participantType' => $participantType,
             'csrfToken' => Csrf::token(),
             'canReport' => $canReport,
+            'teamMatchMode' => $teamMatchMode,
+            'teamRoster1' => $teamRoster1,
+            'teamRoster2' => $teamRoster2,
+            'teamLineup1' => $teamLineup1,
+            'teamLineup2' => $teamLineup2,
+            'teamDuels' => $teamDuels,
+            'teamCanSetLineup1' => $teamCanSetLineup1,
+            'teamCanSetLineup2' => $teamCanSetLineup2,
+            'teamCanConfirmDuel' => $teamCanConfirmDuel,
+            'teamDuelWins1' => $teamDuelWins1,
+            'teamDuelWins2' => $teamDuelWins2,
+            'teamNeedsCaptainTiebreak' => $teamNeedsCaptainTiebreak,
+            'multiRounds' => $multiRounds,
+            'multiTotal1' => $multiTotal1,
+            'multiTotal2' => $multiTotal2,
+            'multiCanAddRound' => $multiCanAddRound,
+            'multiCanFinalize' => $multiCanFinalize,
             'pickbanRequired' => $pickbanRequired,
             'pickbanLocked' => $pickbanLocked,
             'pickbanBlockingReport' => $pickbanBlockingReport,

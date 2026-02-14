@@ -8,7 +8,7 @@ use DuelDesk\View;
 /** @var array<string, mixed>|null $event */
 /** @var list<array<string, mixed>> $tournaments */
 /** @var list<array<string, mixed>> $availableTournaments */
-/** @var array{name:string,status:string,starts_at:string,ends_at:string,location:string,description:string} $old */
+/** @var array{name:string,participant_type:string,status:string,starts_at:string,ends_at:string,location:string,description:string} $old */
 /** @var array<string,string> $errors */
 /** @var string $csrfToken */
 
@@ -65,6 +65,19 @@ $publicPath = $slug !== '' ? ('/lan/' . $slug) : '';
                     <?php if (field_error_lan($errors, 'name')): ?>
                         <span class="field__error"><?= View::e((string)field_error_lan($errors, 'name')) ?></span>
                     <?php endif; ?>
+                </label>
+
+                <label class="field">
+                    <span class="field__label">Participants (LAN)</span>
+                    <select class="select<?= field_error_lan($errors, 'participant_type') ? ' input--error' : '' ?>" name="participant_type">
+                        <?php foreach (['solo' => 'Solo', 'team' => 'Equipe'] as $k => $label): ?>
+                            <option value="<?= View::e((string)$k) ?>" <?= ($old['participant_type'] ?? 'solo') === (string)$k ? 'selected' : '' ?>><?= View::e((string)$label) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php if (field_error_lan($errors, 'participant_type')): ?>
+                        <span class="field__error"><?= View::e((string)field_error_lan($errors, 'participant_type')) ?></span>
+                    <?php endif; ?>
+                    <span class="muted">Les tournois rattaches doivent avoir le meme type.</span>
                 </label>
 
                 <label class="field">
@@ -193,25 +206,40 @@ $publicPath = $slug !== '' ? ('/lan/' . $slug) : '';
             </div>
         </div>
         <div class="card__body">
-            <?php if ($availableTournaments === []): ?>
+            <?php
+                $want = (string)($old['participant_type'] ?? 'solo');
+                if (!in_array($want, ['solo', 'team'], true)) {
+                    $want = 'solo';
+                }
+
+                $availableFiltered = array_values(array_filter($availableTournaments, static function (array $t) use ($want): bool {
+                    $tt = (string)($t['participant_type'] ?? 'solo');
+                    if (!in_array($tt, ['solo', 'team'], true)) {
+                        $tt = 'solo';
+                    }
+                    return $tt === $want;
+                }));
+            ?>
+
+            <?php if ($availableFiltered === []): ?>
                 <div class="empty empty--compact">
                     <div class="empty__title">Aucun tournoi disponible</div>
-                    <div class="empty__hint">Tous les tournois sont deja rattaches a un LAN, ou il n'y en a pas.</div>
+                    <div class="empty__hint">Aucun tournoi du type <?= View::e($want === 'team' ? 'Equipe' : 'Solo') ?> n'est disponible (ou ils sont deja rattaches a un LAN).</div>
                 </div>
             <?php else: ?>
                 <form method="post" action="/admin/lan/<?= (int)$id ?>/tournaments/attach" class="inline">
                     <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
                     <select class="select" name="tournament_id" required>
                         <option value="" disabled selected>Choisir un tournoi...</option>
-                        <?php foreach ($availableTournaments as $t): ?>
+                        <?php foreach ($availableFiltered as $t): ?>
                             <?php $tid = (int)($t['id'] ?? 0); ?>
                             <option value="<?= (int)$tid ?>"><?= View::e((string)($t['name'] ?? ('#' . $tid))) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <button class="btn btn--primary" type="submit">Ajouter</button>
                 </form>
+                <div class="muted" style="margin-top: 8px;">Seuls les tournois du meme type (<?= View::e($want === 'team' ? 'Equipe' : 'Solo') ?>) sont listés.</div>
             <?php endif; ?>
         </div>
     </section>
 <?php endif; ?>
-

@@ -10,6 +10,23 @@ use DuelDesk\Support\Auth;
 /** @var 'solo'|'team' $participantType */
 /** @var string $csrfToken */
 /** @var bool $canReport */
+/** @var 'standard'|'lineup_duels' $teamMatchMode */
+/** @var list<array<string,mixed>> $teamRoster1 */
+/** @var list<array<string,mixed>> $teamRoster2 */
+/** @var list<array{pos:int,user_id:int,username:string}> $teamLineup1 */
+/** @var list<array{pos:int,user_id:int,username:string}> $teamLineup2 */
+/** @var list<array<string,mixed>> $teamDuels */
+/** @var bool $teamCanSetLineup1 */
+/** @var bool $teamCanSetLineup2 */
+/** @var bool $teamCanConfirmDuel */
+/** @var int $teamDuelWins1 */
+/** @var int $teamDuelWins2 */
+/** @var bool $teamNeedsCaptainTiebreak */
+/** @var list<array<string,mixed>> $multiRounds */
+/** @var int $multiTotal1 */
+/** @var int $multiTotal2 */
+/** @var bool $multiCanAddRound */
+/** @var bool $multiCanFinalize */
 /** @var bool $pickbanRequired */
 /** @var bool $pickbanLocked */
 /** @var bool $pickbanBlockingReport */
@@ -124,6 +141,7 @@ if ($meIsB && $hasReportB) {
 }
 
 $matchComplete = $aId !== null && $bId !== null;
+$meId = Auth::id();
 ?>
 
 <div
@@ -198,6 +216,329 @@ $matchComplete = $aId !== null && $bId !== null;
         </div>
     </div>
 </section>
+
+<?php if ($participantType === 'team' && ($teamMatchMode ?? 'standard') === 'lineup_duels' && $matchComplete && !in_array($status, ['confirmed', 'void'], true)): ?>
+    <?php
+        $teamSize = (int)($tournament['team_size'] ?? 0);
+        if ($teamSize <= 0) $teamSize = 2;
+
+        $l1ByPos = [];
+        foreach ($teamLineup1 as $r) {
+            $p = (int)($r['pos'] ?? 0);
+            $l1ByPos[$p] = (int)($r['user_id'] ?? 0);
+        }
+        $l2ByPos = [];
+        foreach ($teamLineup2 as $r) {
+            $p = (int)($r['pos'] ?? 0);
+            $l2ByPos[$p] = (int)($r['user_id'] ?? 0);
+        }
+
+        $roster1 = [];
+        foreach ($teamRoster1 as $m) {
+            if (!is_array($m)) continue;
+            $uid = (int)($m['user_id'] ?? 0);
+            if ($uid <= 0) continue;
+            $roster1[] = [
+                'user_id' => $uid,
+                'username' => (string)($m['username'] ?? ''),
+                'role' => (string)($m['role'] ?? 'member'),
+            ];
+        }
+        $roster2 = [];
+        foreach ($teamRoster2 as $m) {
+            if (!is_array($m)) continue;
+            $uid = (int)($m['user_id'] ?? 0);
+            if ($uid <= 0) continue;
+            $roster2[] = [
+                'user_id' => $uid,
+                'username' => (string)($m['username'] ?? ''),
+                'role' => (string)($m['role'] ?? 'member'),
+            ];
+        }
+
+        $default1 = [];
+        $i = 1;
+        foreach ($roster1 as $m) { $default1[$i++] = (int)$m['user_id']; }
+        $default2 = [];
+        $i = 1;
+        foreach ($roster2 as $m) { $default2[$i++] = (int)$m['user_id']; }
+    ?>
+
+    <section class="card" style="margin-top: 18px;">
+        <div class="card__header">
+            <div>
+                <h2 class="card__title">Crew battle (ordre de passage)</h2>
+                <p class="card__subtitle">Chaque capitaine choisit un ordre. Duel par duel. En cas d'egalite: duel des capitaines.</p>
+            </div>
+            <div class="pill pill--soft"><?= (int)$teamDuelWins1 ?> - <?= (int)$teamDuelWins2 ?></div>
+        </div>
+
+        <div class="card__body">
+            <div class="split">
+                <div class="card card--nested">
+                    <div class="card__header">
+                        <h3 class="card__title"><?= View::e($aLabel) ?> (A)</h3>
+                        <?php if ($teamCanSetLineup1): ?><span class="pill pill--soft">Capitaine</span><?php endif; ?>
+                    </div>
+                    <div class="card__body">
+                        <form class="form" method="post" action="/tournaments/<?= (int)$tid ?>/matches/<?= (int)$mid ?>/team-lineup" novalidate>
+                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                            <input type="hidden" name="team_slot" value="1">
+                            <?php for ($p = 1; $p <= $teamSize; $p++): ?>
+                                <?php $sel = $l1ByPos[$p] ?? ($default1[$p] ?? 0); ?>
+                                <label class="field">
+                                    <span class="field__label">#<?= (int)$p ?></span>
+                                    <select class="select" name="lineup[<?= (int)$p ?>]" <?= $teamCanSetLineup1 ? '' : 'disabled' ?>>
+                                        <?php foreach ($roster1 as $m): ?>
+                                            <?php $uid = (int)$m['user_id']; ?>
+                                            <?php $nm = (string)$m['username']; ?>
+                                            <?php $suffix = ((string)$m['role'] === 'captain') ? ' (c)' : ''; ?>
+                                            <option value="<?= (int)$uid ?>" <?= $uid === (int)$sel ? 'selected' : '' ?>><?= View::e($nm . $suffix) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </label>
+                            <?php endfor; ?>
+
+                            <?php if ($teamCanSetLineup1): ?>
+                                <button class="btn btn--primary" type="submit">Enregistrer ordre (A)</button>
+                            <?php else: ?>
+                                <div class="muted">Seul le capitaine (ou admin) peut modifier.</div>
+                            <?php endif; ?>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card card--nested">
+                    <div class="card__header">
+                        <h3 class="card__title"><?= View::e($bLabel) ?> (B)</h3>
+                        <?php if ($teamCanSetLineup2): ?><span class="pill pill--soft">Capitaine</span><?php endif; ?>
+                    </div>
+                    <div class="card__body">
+                        <form class="form" method="post" action="/tournaments/<?= (int)$tid ?>/matches/<?= (int)$mid ?>/team-lineup" novalidate>
+                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                            <input type="hidden" name="team_slot" value="2">
+                            <?php for ($p = 1; $p <= $teamSize; $p++): ?>
+                                <?php $sel = $l2ByPos[$p] ?? ($default2[$p] ?? 0); ?>
+                                <label class="field">
+                                    <span class="field__label">#<?= (int)$p ?></span>
+                                    <select class="select" name="lineup[<?= (int)$p ?>]" <?= $teamCanSetLineup2 ? '' : 'disabled' ?>>
+                                        <?php foreach ($roster2 as $m): ?>
+                                            <?php $uid = (int)$m['user_id']; ?>
+                                            <?php $nm = (string)$m['username']; ?>
+                                            <?php $suffix = ((string)$m['role'] === 'captain') ? ' (c)' : ''; ?>
+                                            <option value="<?= (int)$uid ?>" <?= $uid === (int)$sel ? 'selected' : '' ?>><?= View::e($nm . $suffix) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </label>
+                            <?php endfor; ?>
+
+                            <?php if ($teamCanSetLineup2): ?>
+                                <button class="btn btn--primary" type="submit">Enregistrer ordre (B)</button>
+                            <?php else: ?>
+                                <div class="muted">Seul le capitaine (ou admin) peut modifier.</div>
+                            <?php endif; ?>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section" style="margin-top: 18px;">
+                <h3 class="card__title" style="margin: 0 0 10px;">Duels</h3>
+                <?php if ($teamDuels === []): ?>
+                    <div class="empty empty--compact">
+                        <div class="empty__title">Duels pas encore generes</div>
+                        <div class="empty__hint">Renseigne les deux ordres de passage.</div>
+                    </div>
+                <?php else: ?>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Duel</th>
+                                <th>Statut</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($teamDuels as $d): ?>
+                                <?php if (!is_array($d)) continue; ?>
+                                <?php
+                                    $dk = (string)($d['kind'] ?? 'regular');
+                                    $idx = (int)($d['duel_index'] ?? 0);
+                                    $duelId = (int)($d['id'] ?? 0);
+                                    $st = (string)($d['status'] ?? 'pending');
+                                    $u1 = (string)($d['team1_username'] ?? '');
+                                    $u2 = (string)($d['team2_username'] ?? '');
+                                    $w = $d['winner_slot'] ?? null;
+                                    $w = (is_int($w) || is_string($w)) ? (int)$w : 0;
+                                    $label = $dk === 'captain_tiebreak' ? 'Capitaines' : ('Duel ' . $idx);
+                                ?>
+                                <tr>
+                                    <td class="mono"><?= View::e($label) ?></td>
+                                    <td><?= View::e($u1) ?> vs <?= View::e($u2) ?></td>
+                                    <td>
+                                        <span class="pill pill--soft"><?= View::e($st) ?></span>
+                                        <?php if ($st === 'confirmed' && ($w === 1 || $w === 2)): ?>
+                                            <span class="pill"><?= $w === 1 ? 'A' : 'B' ?> gagne</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if ($st !== 'confirmed' && $duelId > 0 && Auth::check() && ($teamCanConfirmDuel || ($meId !== null && ($meId === (int)($d['team1_user_id'] ?? 0) || $meId === (int)($d['team2_user_id'] ?? 0))))): ?>
+                                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                                <form method="post" action="/tournaments/<?= (int)$tid ?>/matches/<?= (int)$mid ?>/team-duels/<?= (int)$duelId ?>/confirm">
+                                                    <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                                                    <input type="hidden" name="winner_slot" value="1">
+                                                    <button class="btn btn--ghost" type="submit"><?= View::e($u1 !== '' ? $u1 : 'A') ?> gagne</button>
+                                                </form>
+                                                <form method="post" action="/tournaments/<?= (int)$tid ?>/matches/<?= (int)$mid ?>/team-duels/<?= (int)$duelId ?>/confirm">
+                                                    <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                                                    <input type="hidden" name="winner_slot" value="2">
+                                                    <button class="btn btn--ghost" type="submit"><?= View::e($u2 !== '' ? $u2 : 'B') ?> gagne</button>
+                                                </form>
+                                            </div>
+                                        <?php else: ?>
+                                            <span class="muted">-</span>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+
+                    <?php if ($teamNeedsCaptainTiebreak): ?>
+                        <div class="form__hint">Egalite: le duel des capitaines doit etre joue.</div>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+    </section>
+<?php endif; ?>
+
+<?php if ($participantType === 'team' && ($teamMatchMode ?? 'standard') === 'multi_round' && $matchComplete && !in_array($status, ['confirmed', 'void'], true)): ?>
+    <section class="card" style="margin-top: 18px;">
+        <div class="card__header">
+            <div>
+                <h2 class="card__title">Multi-round (points)</h2>
+                <p class="card__subtitle">Ajoute un round par manche/show. DuelDesk somme les points et finalise le match.</p>
+            </div>
+            <div class="pill"><?= (int)$multiTotal1 ?> - <?= (int)$multiTotal2 ?></div>
+        </div>
+
+        <div class="card__body">
+            <?php if ($multiRounds === []): ?>
+                <div class="empty empty--compact">
+                    <div class="empty__title">Aucun round</div>
+                    <div class="empty__hint">Ajoute le premier round pour commencer.</div>
+                </div>
+            <?php else: ?>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Type</th>
+                            <th><?= View::e($aLabel) ?> (A)</th>
+                            <th><?= View::e($bLabel) ?> (B)</th>
+                            <th>Note</th>
+                            <?php if (Auth::isAdmin()): ?><th></th><?php endif; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($multiRounds as $r): ?>
+                            <?php if (!is_array($r)) continue; ?>
+                            <?php
+                                $rid = (int)($r['id'] ?? 0);
+                                $idx = (int)($r['round_index'] ?? 0);
+                                $kind = (string)($r['kind'] ?? 'regular');
+                                $p1 = (int)($r['points1'] ?? 0);
+                                $p2 = (int)($r['points2'] ?? 0);
+                                $note = is_string($r['note'] ?? null) ? (string)$r['note'] : '';
+                            ?>
+                            <tr>
+                                <td class="mono"><?= (int)$idx ?></td>
+                                <td><span class="pill pill--soft"><?= View::e($kind) ?></span></td>
+                                <td class="mono"><?= (int)$p1 ?></td>
+                                <td class="mono"><?= (int)$p2 ?></td>
+                                <td><?= $note !== '' ? View::e($note) : '<span class="muted">-</span>' ?></td>
+                                <?php if (Auth::isAdmin()): ?>
+                                    <td>
+                                        <?php if ($rid > 0): ?>
+                                            <form method="post" action="/tournaments/<?= (int)$tid ?>/matches/<?= (int)$mid ?>/rounds/<?= (int)$rid ?>/delete" data-confirm="Supprimer ce round ?">
+                                                <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                                                <button class="btn btn--ghost" type="submit">Supprimer</button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </td>
+                                <?php endif; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th colspan="2" style="text-align:right;">Total</th>
+                            <th class="mono"><?= (int)$multiTotal1 ?></th>
+                            <th class="mono"><?= (int)$multiTotal2 ?></th>
+                            <th colspan="<?= Auth::isAdmin() ? 2 : 1 ?>"></th>
+                        </tr>
+                    </tfoot>
+                </table>
+            <?php endif; ?>
+
+            <div class="split" style="margin-top: 14px;">
+                <div class="card card--nested">
+                    <div class="card__header">
+                        <h3 class="card__title">Ajouter un round</h3>
+                        <?php if (!$multiCanAddRound): ?><span class="pill pill--soft">Capitaines/Admin</span><?php endif; ?>
+                    </div>
+                    <div class="card__body">
+                        <form class="form" method="post" action="/tournaments/<?= (int)$tid ?>/matches/<?= (int)$mid ?>/rounds/add" novalidate>
+                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                            <label class="field">
+                                <span class="field__label">Type</span>
+                                <select class="select" name="kind" <?= $multiCanAddRound ? '' : 'disabled' ?>>
+                                    <option value="regular">regular</option>
+                                    <option value="tiebreak">tiebreak</option>
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span class="field__label">Points A</span>
+                                <input class="input" name="points1" inputmode="numeric" placeholder="Ex: 10" <?= $multiCanAddRound ? '' : 'disabled' ?>>
+                            </label>
+                            <label class="field">
+                                <span class="field__label">Points B</span>
+                                <input class="input" name="points2" inputmode="numeric" placeholder="Ex: 8" <?= $multiCanAddRound ? '' : 'disabled' ?>>
+                            </label>
+                            <label class="field field--full">
+                                <span class="field__label">Note (optionnel)</span>
+                                <input class="input" name="note" maxlength="255" placeholder="Ex: manche 1 (survival)" <?= $multiCanAddRound ? '' : 'disabled' ?>>
+                            </label>
+                            <?php if ($multiCanAddRound): ?>
+                                <button class="btn btn--primary" type="submit">Ajouter</button>
+                            <?php else: ?>
+                                <div class="muted">Seul un capitaine (ou admin) peut ajouter.</div>
+                            <?php endif; ?>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card card--nested">
+                    <div class="card__header">
+                        <h3 class="card__title">Finaliser le match</h3>
+                    </div>
+                    <div class="card__body">
+                        <p class="muted" style="margin-top:0;">Finalise uniquement si le total n'est pas a egalite.</p>
+                        <form method="post" action="/tournaments/<?= (int)$tid ?>/matches/<?= (int)$mid ?>/rounds/finalize" novalidate>
+                            <input type="hidden" name="csrf_token" value="<?= View::e($csrfToken) ?>">
+                            <button class="btn btn--ghost" type="submit" <?= ($multiCanFinalize && $multiRounds !== [] && $multiTotal1 !== $multiTotal2) ? '' : 'disabled' ?>>Finaliser</button>
+                        </form>
+                        <?php if ($multiRounds !== [] && $multiTotal1 === $multiTotal2): ?>
+                            <div class="form__hint">Egalite: ajoute un round (type tiebreak) pour departager.</div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+<?php endif; ?>
 
 <div data-partial="pickban">
     <?php if ($pickbanRequired && $matchComplete): ?>

@@ -1,0 +1,17 @@
+{
+  # Email is optional; Caddy will still get certificates without it, but it's recommended.
+  # email you@example.com
+}
+
+{$APP_DOMAIN} {
+  encode zstd gzip
+
+  # Forward real scheme so PHP can set Secure cookies behind TLS.
+  header_up X-Forwarded-Proto https
+
+  # HSTS (enable once you're sure HTTPS is working).
+  header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+  reverse_proxy nginx:80
+}
+

@@ -45,6 +45,23 @@ final class TournamentRepository
         return (int)$stmt->fetchColumn();
     }
 
+    public function countSearchPublic(string $query): int
+    {
+        $query = trim($query);
+        if ($query === '') {
+            $stmt = $this->pdo->query('SELECT COUNT(*) FROM tournaments WHERE lan_event_id IS NULL');
+            return (int)$stmt->fetchColumn();
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM tournaments'
+            . ' WHERE lan_event_id IS NULL AND (name LIKE ? OR game LIKE ? OR slug LIKE ?)'
+        );
+        $v = '%' . $query . '%';
+        $stmt->execute([$v, $v, $v]);
+        return (int)$stmt->fetchColumn();
+    }
+
     /** @return list<array<string, mixed>> */
     public function searchPaged(string $query, int $page, int $perPage): array
     {
@@ -81,6 +98,74 @@ final class TournamentRepository
         }
         $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        /** @var list<array<string, mixed>> */
+        return $stmt->fetchAll();
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function searchPagedPublic(string $query, int $page, int $perPage): array
+    {
+        $query = trim($query);
+        if ($page <= 0) {
+            $page = 1;
+        }
+        if ($perPage <= 0) {
+            $perPage = 20;
+        }
+        if ($perPage > 100) {
+            $perPage = 100;
+        }
+
+        $offset = ($page - 1) * $perPage;
+
+        $sql = 'SELECT t.*, g.image_path AS game_image_path, le.name AS lan_event_name, le.slug AS lan_event_slug'
+            . ' FROM tournaments t'
+            . ' LEFT JOIN games g ON g.id = t.game_id'
+            . ' LEFT JOIN lan_events le ON le.id = t.lan_event_id'
+            . ' WHERE t.lan_event_id IS NULL';
+
+        $params = [];
+        if ($query !== '') {
+            $sql .= ' AND (t.name LIKE :q1 OR t.game LIKE :q2 OR t.slug LIKE :q3)';
+            $v = '%' . $query . '%';
+            $params = ['q1' => $v, 'q2' => $v, 'q3' => $v];
+        }
+
+        $sql .= ' ORDER BY t.created_at DESC LIMIT :limit OFFSET :offset';
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $k => $v) {
+            $stmt->bindValue(':' . $k, $v, PDO::PARAM_STR);
+        }
+        $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        /** @var list<array<string, mixed>> */
+        return $stmt->fetchAll();
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function recentPublic(int $limit = 5): array
+    {
+        if ($limit <= 0) {
+            $limit = 5;
+        }
+        if ($limit > 50) {
+            $limit = 50;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT t.*, g.image_path AS game_image_path'
+            . ' FROM tournaments t'
+            . ' LEFT JOIN games g ON g.id = t.game_id'
+            . ' WHERE t.lan_event_id IS NULL'
+            . ' ORDER BY t.created_at DESC'
+            . ' LIMIT :limit'
+        );
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
 
         /** @var list<array<string, mixed>> */
@@ -154,6 +239,7 @@ final class TournamentRepository
         string $format,
         string $participantType,
         ?int $teamSize,
+        string $teamMatchMode,
         string $status,
         ?string $startsAt,
         ?int $maxEntrants = null,
@@ -165,8 +251,8 @@ final class TournamentRepository
     ): int
     {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO tournaments (owner_user_id, lan_event_id, game_id, name, slug, game, format, participant_type, team_size, status, starts_at, max_entrants, signup_closes_at, best_of_default, best_of_final, pickban_start_mode)'
-            . ' VALUES (:owner_user_id, :lan_event_id, :game_id, :name, :slug, :game, :format, :participant_type, :team_size, :status, :starts_at, :max_entrants, :signup_closes_at, :best_of_default, :best_of_final, :pickban_start_mode)'
+            'INSERT INTO tournaments (owner_user_id, lan_event_id, game_id, name, slug, game, format, participant_type, team_size, team_match_mode, status, starts_at, max_entrants, signup_closes_at, best_of_default, best_of_final, pickban_start_mode)'
+            . ' VALUES (:owner_user_id, :lan_event_id, :game_id, :name, :slug, :game, :format, :participant_type, :team_size, :team_match_mode, :status, :starts_at, :max_entrants, :signup_closes_at, :best_of_default, :best_of_final, :pickban_start_mode)'
         );
 
         $slug = $this->uniqueSlug($name);
@@ -181,6 +267,7 @@ final class TournamentRepository
             'format' => $format,
             'participant_type' => $participantType,
             'team_size' => $teamSize,
+            'team_match_mode' => $teamMatchMode,
             'status' => $status,
             'starts_at' => $startsAt,
             'max_entrants' => $maxEntrants,
@@ -220,12 +307,13 @@ final class TournamentRepository
         string $format,
         string $participantType,
         ?int $teamSize,
+        string $teamMatchMode,
         ?int $lanEventId = null
     ): void
     {
         $stmt = $this->pdo->prepare(
             'UPDATE tournaments'
-            . ' SET name = :name, game_id = :game_id, game = :game, format = :format, participant_type = :participant_type, team_size = :team_size, lan_event_id = :lan_event_id'
+            . ' SET name = :name, game_id = :game_id, game = :game, format = :format, participant_type = :participant_type, team_size = :team_size, team_match_mode = :team_match_mode, lan_event_id = :lan_event_id'
             . ' WHERE id = :id'
         );
         $stmt->execute([
@@ -235,6 +323,7 @@ final class TournamentRepository
             'format' => $format,
             'participant_type' => $participantType,
             'team_size' => $teamSize,
+            'team_match_mode' => $teamMatchMode,
             'lan_event_id' => $lanEventId,
             'id' => $tournamentId,
         ]);

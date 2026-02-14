@@ -7,6 +7,7 @@ namespace DuelDesk\Controllers;
 use DuelDesk\Http\Response;
 use DuelDesk\Repositories\LanEventRepository;
 use DuelDesk\Repositories\TournamentRepository;
+use DuelDesk\Services\LanScoring;
 use DuelDesk\View;
 
 final class LanEventController
@@ -41,11 +42,13 @@ final class LanEventController
         $tRepo = new TournamentRepository();
         $tournaments = $eId > 0 ? $tRepo->listByLanEventId($eId) : [];
 
+        $scoring = LanScoring::compute($event, $tournaments);
+
         View::render('lan/show', [
             'title' => ((string)($event['name'] ?? 'LAN')) . ' | DuelDesk',
             'event' => $event,
             'tournaments' => $tournaments,
+            'scoring' => $scoring,
         ]);
     }
 }
-

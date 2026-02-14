@@ -6,7 +6,7 @@ use DuelDesk\View;
 
 /** @var list<array<string, mixed>> $games */
 /** @var list<array<string, mixed>> $lanEvents */
-/** @var array{name:string,game_id:string,format:string,participant_type:string,team_size:string,max_entrants:string,signup_closes_at:string,best_of_default:string,best_of_final:string,pickban_start_mode:string,lan_event_id:string,status:string,starts_at:string} $old */
+/** @var array{name:string,game_id:string,format:string,participant_type:string,team_size:string,team_match_mode:string,max_entrants:string,signup_closes_at:string,best_of_default:string,best_of_final:string,pickban_start_mode:string,lan_event_id:string,status:string,starts_at:string} $old */
 /** @var array<string,string> $errors */
 /** @var string $csrfToken */
 
@@ -149,6 +149,19 @@ function field_error(array $errors, string $key): ?string
                 <span class="muted">Utilise uniquement si le tournoi est en mode equipe.</span>
                 <?php if (field_error($errors, 'team_size')): ?>
                     <span class="field__error"><?= View::e((string)field_error($errors, 'team_size')) ?></span>
+                <?php endif; ?>
+            </label>
+
+            <label class="field">
+                <span class="field__label">Mode equipe</span>
+                <select class="select<?= field_error($errors, 'team_match_mode') ? ' input--error' : '' ?>" name="team_match_mode">
+                    <option value="standard" <?= ($old['team_match_mode'] ?? 'standard') === 'standard' ? 'selected' : '' ?>>Standard (un score)</option>
+                    <option value="lineup_duels" <?= ($old['team_match_mode'] ?? 'standard') === 'lineup_duels' ? 'selected' : '' ?>>Lineup 1v1 (ordre de passage)</option>
+                    <option value="multi_round" <?= ($old['team_match_mode'] ?? 'standard') === 'multi_round' ? 'selected' : '' ?>>Multi-round (points)</option>
+                </select>
+                <span class="muted">Utilise uniquement si le tournoi est en mode equipe (ex: 2XKO).</span>
+                <?php if (field_error($errors, 'team_match_mode')): ?>
+                    <span class="field__error"><?= View::e((string)field_error($errors, 'team_match_mode')) ?></span>
                 <?php endif; ?>
             </label>
 

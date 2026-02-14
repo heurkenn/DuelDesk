@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS lan_events (
   owner_user_id BIGINT UNSIGNED NULL,
   name VARCHAR(120) NOT NULL,
   slug VARCHAR(160) NOT NULL,
+  participant_type ENUM('solo','team') NOT NULL DEFAULT 'solo',
   status ENUM('draft','published','running','completed') NOT NULL DEFAULT 'draft',
   starts_at DATETIME NULL,
   ends_at DATETIME NULL,
@@ -87,6 +88,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
   format ENUM('single_elim','double_elim','round_robin') NOT NULL DEFAULT 'single_elim',
   participant_type ENUM('solo','team') NOT NULL DEFAULT 'solo',
   team_size INT UNSIGNED NULL,
+  team_match_mode ENUM('standard','lineup_duels','multi_round') NOT NULL DEFAULT 'standard',
   status ENUM('draft','published','running','completed') NOT NULL DEFAULT 'draft',
   starts_at DATETIME NULL,
   max_entrants INT UNSIGNED NULL,
@@ -224,6 +226,65 @@ CREATE TABLE IF NOT EXISTS matches (
   CONSTRAINT fk_matches_winner_team FOREIGN KEY (winner_team_id) REFERENCES teams(id) ON DELETE SET NULL,
   CONSTRAINT fk_matches_reported_by_user FOREIGN KEY (reported_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   CONSTRAINT fk_matches_counter_reported_by_user FOREIGN KEY (counter_reported_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Team match lineups + duels (crew battle / order of play)
+CREATE TABLE IF NOT EXISTS match_team_lineups (
+  match_id BIGINT UNSIGNED NOT NULL,
+  team_slot TINYINT UNSIGNED NOT NULL,
+  pos INT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (match_id, team_slot, pos),
+  UNIQUE KEY uniq_mtl_match_slot_user (match_id, team_slot, user_id),
+  KEY idx_mtl_user_id (user_id),
+  CONSTRAINT fk_mtl_match FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+  CONSTRAINT fk_mtl_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS match_team_duels (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  match_id BIGINT UNSIGNED NOT NULL,
+  kind ENUM('regular','captain_tiebreak') NOT NULL DEFAULT 'regular',
+  duel_index INT UNSIGNED NOT NULL,
+  team1_user_id BIGINT UNSIGNED NOT NULL,
+  team2_user_id BIGINT UNSIGNED NOT NULL,
+  winner_slot TINYINT UNSIGNED NULL,
+  status ENUM('pending','confirmed') NOT NULL DEFAULT 'pending',
+  reported_by_user_id BIGINT UNSIGNED NULL,
+  reported_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_mtd_match_kind_index (match_id, kind, duel_index),
+  KEY idx_mtd_match_id (match_id),
+  KEY idx_mtd_t1_user (team1_user_id),
+  KEY idx_mtd_t2_user (team2_user_id),
+  KEY idx_mtd_reported_by (reported_by_user_id),
+  CONSTRAINT fk_mtd_match FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+  CONSTRAINT fk_mtd_t1_user FOREIGN KEY (team1_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_mtd_t2_user FOREIGN KEY (team2_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_mtd_reported_by FOREIGN KEY (reported_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Per-match rounds (multi-round points scoring; useful for games like Fall Guys)
+CREATE TABLE IF NOT EXISTS match_rounds (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  match_id BIGINT UNSIGNED NOT NULL,
+  round_index INT UNSIGNED NOT NULL,
+  kind ENUM('regular','tiebreak') NOT NULL DEFAULT 'regular',
+  points1 INT NOT NULL DEFAULT 0,
+  points2 INT NOT NULL DEFAULT 0,
+  note VARCHAR(255) NULL,
+  created_by_user_id BIGINT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_match_rounds_match_idx (match_id, round_index),
+  KEY idx_match_rounds_match (match_id),
+  KEY idx_match_rounds_created_by (created_by_user_id),
+  CONSTRAINT fk_match_rounds_match FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+  CONSTRAINT fk_match_rounds_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Audit log (admin + reporting)

@@ -334,6 +334,15 @@ h1, h2, h3 {
   box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.15);
 }
 
+.userchip__avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(7, 11, 20, 0.40);
+  object-fit: cover;
+}
+
 .userchip__name {
   font-weight: 800;
   font-size: 13px;
@@ -468,6 +477,9 @@ h1, h2, h3 {
   appearance: none;
   border: 0;
   background: transparent;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
   color: rgba(229, 231, 235, 0.78);
   cursor: pointer;
   padding: 10px 12px;

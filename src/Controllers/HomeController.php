@@ -18,7 +18,8 @@ final class HomeController
 
         try {
             $repo = new TournamentRepository();
-            $recent = array_slice($repo->all(), 0, 5);
+            // Home dashboard: don't surface LAN-only tournaments.
+            $recent = $repo->recentPublic(5);
         } catch (Throwable $e) {
             $dbError = $e->getMessage();
         }

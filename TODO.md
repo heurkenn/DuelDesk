@@ -22,7 +22,7 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 ## Brackets (fonctionnel + visuel)
 
 - [x] Round robin (backend + UI)
-- [ ] Double elimination:
+- [x] Double elimination:
 - [x] grand final "reset" (GF2) si le gagnant du losers bat le gagnant du winners
 - [ ] option "petite finale" (3e place)
 - [ ] Ameliorer les arretes SVG:
@@ -86,7 +86,7 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 - [x] Page equipe (publique) avec:
 - [x] membres + roles (capitaine/member)
 - [x] bouton "copier join code"
-- [ ] Capacites capitaine:
+- [x] Capacites capitaine:
 - [x] rename equipe
 - [x] kick/uninvite membre
 - [x] transfer captain
@@ -141,12 +141,12 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 - [ ] check-in via bouton/commande
 - [x] annonces: webhook "bracket genere" (env `DISCORD_WEBHOOK_URL`)
 - [ ] annonces: ping "next match" / debut tournoi
-- [ ] importer pseudo/avatars (optionnel)
+- [x] importer pseudo/avatars (optionnel)
 
 ## DevOps / Deploiement VPS
 
-- [ ] docker compose "prod" (nginx + php + db) + env vars propres
-- [ ] HTTPS (Caddy/Traefik) + reverse proxy
+- [x] docker compose "prod" (nginx + php + db) + env vars propres
+- [x] HTTPS (Caddy/Traefik) + reverse proxy
 - [ ] Backups automatiques DB + restore procedure
 - [ ] Healthchecks + restart policies
 - [ ] Logs centralises (nginx/php)
@@ -157,7 +157,7 @@ Ce fichier liste ce qu'il reste a faire (MVP -> features) + des idees a ajouter.
 - [ ] generation bracket (SE/DE)
 - [ ] propagation winners/losers
 - [ ] contraintes teams (team_size)
-- [ ] Smoke tests HTTP (routes principales)
+- [x] Smoke tests HTTP (routes principales)
 - [ ] Linting/formatting PHP (phpcs/phpstan) + CI
 
 ## Idees bonus (plus tard)

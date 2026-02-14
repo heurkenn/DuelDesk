@@ -42,6 +42,15 @@ final class TournamentSignupController
             Response::redirect('/tournaments/' . $tournamentId);
         }
 
+        $me = Auth::user();
+        if (!Auth::isAdmin()) {
+            $discordUserId = is_array($me) ? trim((string)($me['discord_user_id'] ?? '')) : '';
+            if ($discordUserId === '') {
+                Flash::set('error', 'Connexion Discord requise: lie ton compte avant de t\'inscrire a un tournoi.');
+                Response::redirect('/account');
+            }
+        }
+
         $status = (string)($t['status'] ?? 'draft');
         $isOpen = in_array($status, ['published', 'running'], true);
 
@@ -77,7 +86,6 @@ final class TournamentSignupController
             }
         }
 
-        $me = Auth::user();
         $meId = Auth::id();
         if ($meId === null || $me === null) {
             Response::badRequest('Not authenticated');

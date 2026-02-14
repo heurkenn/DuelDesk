@@ -32,8 +32,23 @@ services:
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
       DISCORD_ROLE_ID_PARTICIPANT: ${DISCORD_ROLE_ID_PARTICIPANT:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      BOT_API_TOKEN: ${BOT_API_TOKEN:-}
     depends_on:
       - db
+
+  discord-bot:
+    build:
+      context: ./docker/discord-bot
+    environment:
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      BOT_API_TOKEN: ${BOT_API_TOKEN:-}
+      BOT_INTERNAL_URL: ${BOT_INTERNAL_URL:-http://nginx}
+      BOT_PUBLIC_URL: ${APP_URL:-http://localhost:8080}
+      BOT_POLL_SECONDS: ${BOT_POLL_SECONDS:-30}
+      BOT_REMIND_COOLDOWN_SECONDS: ${BOT_REMIND_COOLDOWN_SECONDS:-600}
+    depends_on:
+      - nginx
 
   db:
     image: mariadb:11.4

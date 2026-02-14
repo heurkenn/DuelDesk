@@ -1,0 +1,10 @@
+{
+  "name": "dueldesk-discord-bot",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "discord.js": "^14.18.0"
+  }
+}
+

@@ -7,12 +7,21 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 ### Ce qui a ete fait
 - Projet "DuelDesk": organiser et suivre des tournois (inspire start.gg).
 - Stack: PHP (routing + controllers + views) + JS (UI bracket) + SQL (MariaDB).
-- Docker compose: `nginx` (8080) + `php` + `db` (MariaDB 11.x).
+- Docker compose (dev): `nginx` (8080) + `php` + `db` (MariaDB 11.x) + `discord-bot`.
+- Docker compose (prod): override `docker-compose.prod.yml` (Caddy TLS + pas d'exposition DB/nginx).
 
 ### Comment lancer (dev)
 - `docker compose up -d --build`
 - `docker compose exec php php bin/migrate.php`
 - Option demo: `docker compose exec -T php php bin/seed_demo.php`
+- Smoke test: `sudo -E RESET_DB=1 ./test.sh`
+
+### Comment lancer (prod)
+- Voir `prod.md` (Caddy TLS + variables `.env` + command `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`)
+
+### Migrations (important)
+- Le schema est **squashe** dans `database/migrations/001_schema.sql` (un seul fichier).
+- Si tu as un volume DB plus ancien: fais `bin/dev.sh reset` puis relance `bin/dev.sh up`.
 
 ### Points de repere
 - Routes: `public/index.php`
@@ -43,7 +52,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 ### Fichiers touches
 - `src/Controllers/AuthController.php`
 - `src/Support/Auth.php`, `src/Support/Csrf.php`
-- `database/migrations/002_auth.sql`, `database/migrations/003_username_only.sql`
+- Schema: `database/migrations/001_schema.sql`
 
 ## Etape 3 - Admin (dashboard + roles + games CRUD)
 
@@ -60,7 +69,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - `src/Controllers/AdminGameController.php`
 - `src/Repositories/UserRepository.php`, `src/Repositories/GameRepository.php`
 - `src/Views/admin/index.php`, `src/Views/admin/users.php`, `src/Views/admin/games.php`, `src/Views/admin/game_edit.php`
-- `database/migrations/004_games.sql`
+- Schema: `database/migrations/001_schema.sql`
 
 ## Etape 4 - Tournois (creation + listing + permissions)
 
@@ -74,7 +83,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 ### Fichiers touches
 - `src/Controllers/TournamentController.php`
 - `src/Repositories/TournamentRepository.php`
-- Migrations: `database/migrations/001_init.sql`, `database/migrations/006_teams.sql`
+- Schema: `database/migrations/001_schema.sql`
 
 ## Etape 5 - Inscriptions (solo + equipes)
 
@@ -90,7 +99,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - `src/Controllers/TournamentTeamController.php`
 - `src/Repositories/PlayerRepository.php`, `src/Repositories/TeamRepository.php`, `src/Repositories/TeamMemberRepository.php`
 - `src/Views/tournaments/show.php`
-- Migration: `database/migrations/006_teams.sql`
+- Schema: `database/migrations/001_schema.sql`
 
 ## Etape 6 - Brackets (generation + propagation)
 
@@ -197,7 +206,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - Signup logic: `src/Controllers/TournamentSignupController.php`, `src/Controllers/TournamentTeamController.php`
 - Views: `src/Views/tournaments/show.php`, `src/Views/tournaments/new.php`, `src/Views/admin/tournament.php`
 - JS/CSS: `public/assets/js/app.js`, `public/assets/css/app.css`
-- Migration: `database/migrations/007_tournament_signup_limits.sql`
+- Schema: `database/migrations/001_schema.sql`
 
 ## Etape 12 - Scheduling matchs + Best-of par tournoi
 
@@ -211,7 +220,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - UI publique: la modale match affiche "Prevu: ..." si `scheduled_at` existe.
 
 ### Fichiers touches
-- Migration: `database/migrations/008_tournament_best_of.sql`
+- Schema: `database/migrations/001_schema.sql`
 - Tournoi:
 - `src/Controllers/TournamentController.php`, `src/Views/tournaments/new.php`
 - `src/Controllers/AdminTournamentController.php`, `src/Views/admin/tournament.php`
@@ -330,7 +339,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - onglet Bracket affiche un "Classement" (W/L + diff) + les rounds avec les matchs cliquables (modal + page match).
 
 ### Fichiers touches
-- `database/migrations/009_round_robin.sql`
+- Schema: `database/migrations/001_schema.sql`
 - `src/Services/BracketGenerator.php`
 - `src/Controllers/AdminTournamentController.php`
 - `src/Views/admin/tournament.php`
@@ -381,7 +390,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - affiche un formulaire "Reporter le score" pour les users eligibles
 
 ### Fichiers touches
-- Migrations: `database/migrations/010_match_reporting.sql`, `database/migrations/011_match_disputes.sql`
+- Schema: `database/migrations/001_schema.sql`
 - Routes: `public/index.php`
 - Controller: `src/Controllers/MatchReportController.php`, `src/Controllers/AdminTournamentController.php`, `src/Controllers/TournamentController.php`
 - Repos: `src/Repositories/MatchRepository.php`, `src/Repositories/TeamMemberRepository.php`
@@ -450,7 +459,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - UI: section "Audit" sur la page admin tournoi.
 
 ### Fichiers touches
-- Migration: `database/migrations/012_audit_logs.sql`
+- Schema: `database/migrations/001_schema.sql`
 - Repo: `src/Repositories/AuditLogRepository.php`
 - Controllers: `src/Controllers/MatchReportController.php`, `src/Controllers/AdminTournamentController.php`
 - View: `src/Views/admin/tournament.php`
@@ -465,7 +474,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - Clear sur succes, hit sur echec.
 
 ### Fichiers touches
-- Migration: `database/migrations/013_rate_limits.sql`
+- Schema: `database/migrations/001_schema.sql`
 - Support: `src/Support/RateLimit.php`
 - Controller: `src/Controllers/AuthController.php`
 - `TODO.md`
@@ -535,10 +544,10 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - Ajout d'un champ optionnel `best_of_final` sur les tournois.
 - UI creation tournoi + admin settings: "Best-of (finale)" (defaut = best_of_default).
 - Generation bracket: GF/GF2 utilisent `best_of_final` si defini.
-- TODO: ajout d'une section "Rulesets (par jeu)" + preparation pick/ban maps CS2 (MAPBAN.GG, map pool, sequence BO3).
+- Les rulesets Pick/Ban maps (CS2/Valorant) sont ensuite ajoutes dans l'etape 34.
 
 ### Fichiers touches
-- Migration: `database/migrations/014_tournament_best_of_final.sql`
+- Schema: `database/migrations/001_schema.sql`
 - Controllers: `src/Controllers/TournamentController.php`, `src/Controllers/AdminTournamentController.php`
 - Repo: `src/Repositories/TournamentRepository.php`
 - Service: `src/Services/BracketGenerator.php`
@@ -569,9 +578,29 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - Support: `src/Support/Discord.php`
 - Signup: `src/Controllers/TournamentSignupController.php`, `src/Controllers/TournamentTeamController.php`
 - Admin bracket: `src/Controllers/AdminTournamentController.php`
-- Migration: `database/migrations/015_discord_users.sql`
+- Schema: `database/migrations/001_schema.sql`
 - Env: `.env.example`, `docker-compose.yml`
 - `TODO.md`
+
+## Etape 33b - Discord Bot: slash commands (ephemeral) + report admin
+
+### Ce qui a ete fait
+- Service Docker `discord-bot` (Node + discord.js v14) qui:
+- deploye des commandes slash **guild** (server) dans `DISCORD_GUILD_ID`
+- repond en `ephemeral` (seul l'utilisateur voit le message) pour eviter le spam sur le channel
+- Commandes:
+- `/ping` (health)
+- `/report` (admin): flow select tournoi -> select match -> modal score `2-1`
+- `/pickban` (admin): debug list des pick/ban pending vus par le bot
+- `/cancel` annule le flow courant
+- Reminders pick/ban (poll): le bot check `/api/bot/pickban/pending` et envoie des DM aux capitaines/joueurs concernes (cooldown configurable).
+- API interne:
+- `BOT_API_TOKEN` (Bearer) + endpoints `/api/bot/...` dans l'app PHP
+
+### Fichiers touches
+- Bot: `docker/discord-bot/index.js`, `docker/discord-bot/package.json`
+- Compose/env: `docker-compose.yml`, `.env.example`
+- API: `public/index.php`, `src/Controllers/BotApiController.php`, `src/Support/BotApi.php`
 
 ## Etape 34 - Rulesets: Pick/Ban maps (CS2/Valorant) + blocage reporting
 
@@ -605,7 +634,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - page match: actions pick/ban/report en AJAX (pas de refresh complet)
 
 ### Fichiers touches
-- DB: `database/migrations/001_schema.sql`, `database/migrations/002_rulesets.sql`, `database/migrations/003_pickban_sides.sql`, `database/migrations/004_tournament_pickban_start_mode.sql`
+- DB: `database/migrations/001_schema.sql`
 - Routes: `public/index.php`
 - Controllers: `src/Controllers/PickBanController.php`, `src/Controllers/AdminTournamentController.php`, `src/Controllers/AdminRulesetController.php`, `src/Controllers/TournamentController.php`, `src/Controllers/MatchReportController.php`
 - Service: `src/Services/PickBanEngine.php`
@@ -646,7 +675,7 @@ Ce fichier est fait pour qu'un autre LLM puisse reprendre le travail rapidement.
 - correction UX: les listes (home + `/tournaments`) envoient l'admin vers la vue interne `/tournaments/{id}` (la vue publique `/t/{slug}` reste sans boutons admin)
 
 ### Fichiers touches
-- Migration: `database/migrations/005_lan_events.sql` (et schema `database/migrations/001_schema.sql`)
+- Migration: `database/migrations/001_schema.sql`
 - Routes: `public/index.php`
 - Controllers: `src/Controllers/LanEventController.php`, `src/Controllers/AdminLanEventController.php`, `src/Controllers/TournamentController.php`, `src/Controllers/AdminTournamentController.php`
 - Repos: `src/Repositories/LanEventRepository.php`, `src/Repositories/TournamentRepository.php`

@@ -30,6 +30,7 @@ use DuelDesk\View;
             <thead>
                 <tr>
                     <th>Nom</th>
+                    <th>Type</th>
                     <th>Statut</th>
                     <th>Debut</th>
                     <th>Lieu</th>
@@ -51,6 +52,13 @@ use DuelDesk\View;
                     ?>
                     <tr>
                         <td class="table__strong"><?= View::e((string)($e['name'] ?? 'LAN')) ?></td>
+                        <?php
+                            $ptype = (string)($e['participant_type'] ?? 'solo');
+                            if (!in_array($ptype, ['solo', 'team'], true)) {
+                                $ptype = 'solo';
+                            }
+                        ?>
+                        <td><span class="pill"><?= View::e($ptype === 'team' ? 'Equipe' : 'Solo') ?></span></td>
                         <td><span class="pill pill--soft"><?= View::e((string)($e['status'] ?? 'draft')) ?></span></td>
                         <td><?= $startsAtPretty !== '' ? View::e($startsAtPretty) : '<span class="muted">-</span>' ?></td>
                         <td><?= $location !== '' ? View::e($location) : '<span class="muted">-</span>' ?></td>
@@ -67,4 +75,3 @@ use DuelDesk\View;
         </table>
     </div>
 <?php endif; ?>
-

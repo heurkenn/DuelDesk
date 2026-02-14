@@ -20,7 +20,6 @@ $isPublicView = (bool)($isPublicView ?? false);
 
 $tid = (int)($tournament['id'] ?? 0);
 $slug = (string)($tournament['slug'] ?? '');
-$publicPath = $slug !== '' ? ('/t/' . $slug) : ('/tournaments/' . $tid);
 $participantType = (string)($tournament['participant_type'] ?? 'solo');
 $teamSize = (int)($tournament['team_size'] ?? 0);
 $format = (string)($tournament['format'] ?? 'single_elim');
@@ -28,6 +27,18 @@ $format = (string)($tournament['format'] ?? 'single_elim');
 $lanEventName = is_string($tournament['lan_event_name'] ?? null) ? trim((string)$tournament['lan_event_name']) : '';
 $lanEventSlug = is_string($tournament['lan_event_slug'] ?? null) ? trim((string)$tournament['lan_event_slug']) : '';
 $lanEventHref = $lanEventSlug !== '' ? ('/lan/' . $lanEventSlug) : '';
+
+$publicPath = $slug !== '' ? ('/t/' . $slug) : ('/tournaments/' . $tid);
+if ($lanEventSlug !== '' && $slug !== '') {
+    $publicPath = '/lan/' . $lanEventSlug . '/t/' . $slug;
+}
+
+$backHref = '/tournaments';
+$backLabel = 'Retour';
+if ($isPublicView && $lanEventHref !== '') {
+    $backHref = $lanEventHref;
+    $backLabel = 'Retour LAN';
+}
 
 $status = (string)($tournament['status'] ?? 'draft');
 $isOpenStatus = in_array($status, ['published', 'running'], true);
@@ -240,10 +251,10 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
     <div class="pagehead__actions">
         <a class="btn btn--ghost" href="<?= View::e($publicPath) ?>" title="Lien public partageable">Lien public</a>
         <button class="btn btn--ghost" type="button" data-copy="<?= View::e($publicPath) ?>" title="Copier le lien du tournoi">Copier lien</button>
-        <?php if (Auth::isAdmin() && !$isPublicView): ?>
+        <?php if (Auth::isAdmin() && (!$isPublicView || $lanEventSlug !== '')): ?>
             <a class="btn btn--ghost" href="/admin/tournaments/<?= (int)$tournament['id'] ?>">Gerer</a>
         <?php endif; ?>
-        <a class="btn btn--ghost" href="/tournaments">Retour</a>
+        <a class="btn btn--ghost" href="<?= View::e($backHref) ?>"><?= View::e($backLabel) ?></a>
     </div>
 </div>
 

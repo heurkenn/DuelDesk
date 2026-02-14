@@ -42,6 +42,7 @@ final class AdminLanEventController
             'availableTournaments' => [],
             'old' => [
                 'name' => '',
+                'participant_type' => 'solo',
                 'status' => 'draft',
                 'starts_at' => '',
                 'ends_at' => '',
@@ -82,6 +83,7 @@ final class AdminLanEventController
         $id = $repo->create(
             Auth::id(),
             $built['name'],
+            $built['participantType'],
             $built['status'],
             $built['startsAt'],
             $built['endsAt'],
@@ -121,6 +123,7 @@ final class AdminLanEventController
             'availableTournaments' => $available,
             'old' => [
                 'name' => (string)($event['name'] ?? ''),
+                'participant_type' => (string)($event['participant_type'] ?? 'solo'),
                 'status' => (string)($event['status'] ?? 'draft'),
                 'starts_at' => $this->toDatetimeLocal($event['starts_at'] ?? null),
                 'ends_at' => $this->toDatetimeLocal($event['ends_at'] ?? null),
@@ -175,6 +178,7 @@ final class AdminLanEventController
         $repo->update(
             $id,
             $built['name'],
+            $built['participantType'],
             $built['status'],
             $built['startsAt'],
             $built['endsAt'],
@@ -222,6 +226,19 @@ final class AdminLanEventController
 
         if (($t['lan_event_id'] ?? null) !== null) {
             Flash::set('error', 'Ce tournoi est deja dans un LAN.');
+            Response::redirect('/admin/lan/' . $id);
+        }
+
+        $eventType = (string)($event['participant_type'] ?? 'solo');
+        if (!in_array($eventType, ['solo', 'team'], true)) {
+            $eventType = 'solo';
+        }
+        $tType = (string)($t['participant_type'] ?? 'solo');
+        if (!in_array($tType, ['solo', 'team'], true)) {
+            $tType = 'solo';
+        }
+        if ($eventType !== $tType) {
+            Flash::set('error', "Type incompatible: LAN={$eventType}, tournoi={$tType}.");
             Response::redirect('/admin/lan/' . $id);
         }
 
@@ -309,6 +326,7 @@ final class AdminLanEventController
      *   errors: array<string, string>,
      *   old: array<string, string>,
      *   name: string,
+     *   participantType: string,
      *   status: string,
      *   startsAt: ?string,
      *   endsAt: ?string,
@@ -319,6 +337,7 @@ final class AdminLanEventController
     private function buildFromPost(): array
     {
         $name = trim((string)($_POST['name'] ?? ''));
+        $participantType = (string)($_POST['participant_type'] ?? 'solo');
         $status = (string)($_POST['status'] ?? 'draft');
         $startsAtRaw = (string)($_POST['starts_at'] ?? '');
         $endsAtRaw = (string)($_POST['ends_at'] ?? '');
@@ -327,6 +346,7 @@ final class AdminLanEventController
 
         $old = [
             'name' => $name,
+            'participant_type' => $participantType,
             'status' => $status,
             'starts_at' => $startsAtRaw,
             'ends_at' => $endsAtRaw,
@@ -337,6 +357,10 @@ final class AdminLanEventController
         $errors = [];
         if ($name === '' || $this->strlenSafe($name) > 120) {
             $errors['name'] = 'Nom requis (max 120).';
+        }
+
+        if (!in_array($participantType, ['solo', 'team'], true)) {
+            $errors['participant_type'] = 'Type invalide.';
         }
 
         $allowedStatuses = ['draft', 'published', 'running', 'completed'];
@@ -374,6 +398,7 @@ final class AdminLanEventController
             'errors' => $errors,
             'old' => $old,
             'name' => $name,
+            'participantType' => $participantType,
             'status' => $status,
             'startsAt' => $startsAt,
             'endsAt' => $endsAt,
@@ -424,4 +449,3 @@ final class AdminLanEventController
         return strlen($value);
     }
 }
-
