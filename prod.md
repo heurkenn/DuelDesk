@@ -89,6 +89,18 @@ Ou via le helper:
 bin/prod.sh up
 ```
 
+## Alternative: Traefik (docker provider)
+
+Si tu as deja Traefik qui ecoute sur `:80/:443` et qui route via le provider Docker, utilise:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
+```
+
+Prerequis:
+- le reseau Docker externe de Traefik doit exister (ex: `traefik`)
+- dans `.env`, definir `TRAEFIK_NETWORK` (nom du reseau) et `DUELDESK_HOST` (domaine public)
+
 Optionnel demo:
 
 ```bash

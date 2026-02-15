@@ -351,7 +351,7 @@ final class LanEnrollmentService
                 $tmRepo = new TeamMemberRepository();
                 foreach ($memberUserIds as $uid) {
                     $role = ($captainId !== null && $uid === $captainId) ? 'captain' : 'member';
-                    $tmRepo->add($teamId, $uid, $role);
+                    $tmRepo->addMember($teamId, $uid, $role);
                 }
 
                 // Register team in tournament.
@@ -376,14 +376,14 @@ final class LanEnrollmentService
                     $want[$uid] = true;
                     if (!isset($existingIds[$uid])) {
                         $role = ($captainId !== null && $uid === $captainId) ? 'captain' : 'member';
-                        $tmRepo->add($teamId, $uid, $role);
+                        $tmRepo->addMember($teamId, $uid, $role);
                     }
                 }
 
                 // Remove extra members.
                 foreach (array_keys($existingIds) as $uid) {
                     if (!isset($want[$uid])) {
-                        $tmRepo->remove($teamId, (int)$uid);
+                        $tmRepo->removeMember($teamId, (int)$uid);
                     }
                 }
 

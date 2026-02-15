@@ -1,0 +1,37 @@
+services:
+  # Use this override when you already have Traefik on :80/:443 (docker provider).
+  #
+  # Requirements:
+  # - Your Traefik container must share an external Docker network with this stack.
+  # - Set `TRAEFIK_NETWORK` to that network name.
+  # - Set `DUELDESK_HOST` to the hostname you want (recommended: dueldesk.pafgoutpaf.space).
+  nginx:
+    ports: [] # Traefik will route to the container directly on the Docker network.
+    networks:
+      - default
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:?Set TRAEFIK_NETWORK to your external Traefik network name (e.g. traefik)}"
+      # Router/service names are parameterized to avoid conflicts if you run multiple stacks.
+      - "traefik.http.routers.${TRAEFIK_ROUTER:-dueldesk}.rule=Host(`${DUELDESK_HOST:?Set DUELDESK_HOST to your public hostname (e.g. dueldesk.example.com)}`)"
+      - "traefik.http.routers.${TRAEFIK_ROUTER:-dueldesk}.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.${TRAEFIK_ROUTER:-dueldesk}.tls=true"
+      - "traefik.http.routers.${TRAEFIK_ROUTER:-dueldesk}.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.services.${TRAEFIK_SERVICE:-dueldesk}.loadbalancer.server.port=80"
+
+  # Prod safety: never expose DB publicly when using this override.
+  db:
+    ports: []
+
+  php:
+    restart: unless-stopped
+
+  discord-bot:
+    profiles: ["discord"]
+    restart: unless-stopped
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:?Set TRAEFIK_NETWORK to your external Traefik network name (e.g. traefik)}
