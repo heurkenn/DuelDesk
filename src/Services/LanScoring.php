@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace DuelDesk\Services;
 
+use DuelDesk\Database\Db;
+use DuelDesk\Repositories\LanPlayerRepository;
 use DuelDesk\Repositories\TeamMemberRepository;
 
 final class LanScoring
@@ -27,6 +29,59 @@ final class LanScoring
         $eventType = (string)($event['participant_type'] ?? 'solo');
         if (!in_array($eventType, ['solo', 'team'], true)) {
             $eventType = 'solo';
+        }
+
+        $lanId = (int)($event['id'] ?? 0);
+        $eligibleSoloPlayerIds = null;
+        $eligibleTeamIdsByTournament = [];
+
+        if ($lanId > 0) {
+            if ($eventType === 'solo') {
+                // Map LAN users -> players, so we can exclude accidental non-LAN entrants from scoring.
+                $userIds = (new LanPlayerRepository())->listUserIds($lanId);
+                if ($userIds !== []) {
+                    $placeholders = implode(',', array_fill(0, count($userIds), '?'));
+                    $stmt = Db::pdo()->prepare('SELECT id FROM players WHERE user_id IN (' . $placeholders . ')');
+                    $stmt->execute($userIds);
+                    $rows = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+                    $eligibleSoloPlayerIds = [];
+                    if (is_array($rows)) {
+                        foreach ($rows as $v) {
+                            $pid = (int)$v;
+                            if ($pid > 0) {
+                                $eligibleSoloPlayerIds[$pid] = true;
+                            }
+                        }
+                    }
+                } else {
+                    $eligibleSoloPlayerIds = [];
+                }
+            } else {
+                // For teams, use the LAN team -> tournament team mapping table.
+                foreach ($tournaments as $t) {
+                    $tid = (int)($t['id'] ?? 0);
+                    if ($tid <= 0) {
+                        continue;
+                    }
+                    $stmt = Db::pdo()->prepare(
+                        'SELECT team_id FROM lan_team_tournament_teams ltt'
+                        . ' JOIN lan_teams lt ON lt.id = ltt.lan_team_id'
+                        . ' WHERE lt.lan_event_id = ? AND ltt.tournament_id = ?'
+                    );
+                    $stmt->execute([$lanId, $tid]);
+                    $rows = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+                    $set = [];
+                    if (is_array($rows)) {
+                        foreach ($rows as $v) {
+                            $teamId = (int)$v;
+                            if ($teamId > 0) {
+                                $set[$teamId] = true;
+                            }
+                        }
+                    }
+                    $eligibleTeamIdsByTournament[$tid] = $set;
+                }
+            }
         }
 
         $computedTournaments = 0;
@@ -75,6 +130,21 @@ final class LanScoring
                 $entrantId = is_int($entrantIdRaw) ? $entrantIdRaw : (int)$entrantIdRaw;
                 if ($entrantId <= 0) {
                     continue;
+                }
+
+                // Filter out accidental non-LAN entrants (shouldn't happen once LAN signup is enforced).
+                if ($eventType === 'team') {
+                    $allowed = $eligibleTeamIdsByTournament[$tid] ?? null;
+                    if (is_array($allowed) && $allowed !== [] && !isset($allowed[$entrantId])) {
+                        continue;
+                    }
+                } else {
+                    if (is_array($eligibleSoloPlayerIds) && $eligibleSoloPlayerIds !== [] && !isset($eligibleSoloPlayerIds[$entrantId])) {
+                        continue;
+                    }
+                    if (is_array($eligibleSoloPlayerIds) && $eligibleSoloPlayerIds === []) {
+                        continue;
+                    }
                 }
 
                 $start = (int)($range['start'] ?? 0);
@@ -187,4 +257,3 @@ final class LanScoring
         return max(0, min($maxPoints, $v));
     }
 }
-

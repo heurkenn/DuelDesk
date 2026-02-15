@@ -6,6 +6,7 @@ require __DIR__ . '/../src/Bootstrap.php';
 
 use DuelDesk\Database\Db;
 use DuelDesk\Repositories\GameRepository;
+use DuelDesk\Repositories\LanEventRepository;
 use DuelDesk\Repositories\MatchRepository;
 use DuelDesk\Repositories\PlayerRepository;
 use DuelDesk\Repositories\TeamMemberRepository;
@@ -23,6 +24,7 @@ final class DemoSeeder
         private readonly \PDO $pdo,
         private readonly UserRepository $uRepo = new UserRepository(),
         private readonly GameRepository $gRepo = new GameRepository(),
+        private readonly LanEventRepository $lanRepo = new LanEventRepository(),
         private readonly TournamentRepository $tRepo = new TournamentRepository(),
         private readonly PlayerRepository $pRepo = new PlayerRepository(),
         private readonly TournamentPlayerRepository $tpRepo = new TournamentPlayerRepository(),
@@ -125,6 +127,31 @@ final class DemoSeeder
         $this->seedTeams($tFg, 2, 5, 'dd_fg_', $pwHash, 'FG');
         $this->ensureGenerated($tFg, 'single_elim', 'team');
 
+        // 6) Demo LAN solo: signup to LAN auto-enrolls to all tournaments in the LAN.
+        $lanSoloId = $this->ensureLanEvent('Demo LAN Solo', $adminId, 'solo', 'published');
+        $tLanA = $this->ensureTournament(
+            'Demo LAN Solo A (inscriptions)',
+            $adminId,
+            (int)$sf6['id'],
+            (string)$sf6['name'],
+            'single_elim',
+            'solo',
+            null,
+            'published'
+        );
+        $tLanB = $this->ensureTournament(
+            'Demo LAN Solo B (inscriptions)',
+            $adminId,
+            (int)$sf6['id'],
+            (string)$sf6['name'],
+            'single_elim',
+            'solo',
+            null,
+            'published'
+        );
+        $this->tRepo->updateLanEvent($tLanA, $lanSoloId);
+        $this->tRepo->updateLanEvent($tLanB, $lanSoloId);
+
         fwrite(STDOUT, "\nSeed done.\n");
         fwrite(STDOUT, "Tournois:\n");
         fwrite(STDOUT, " - /tournaments/{$tSolo} (solo DE, users dd_solo_01..08)\n");
@@ -132,6 +159,8 @@ final class DemoSeeder
         fwrite(STDOUT, " - /tournaments/{$tCs2} (CS2 team DE 5v5, users dd_cs2_01..20)\n");
         fwrite(STDOUT, " - /tournaments/{$t2xko} (2XKO crew 2v2, users dd_2xko_01..08)\n");
         fwrite(STDOUT, " - /tournaments/{$tFg} (Fall Guys multi-round 5v5, users dd_fg_01..10)\n");
+        fwrite(STDOUT, "LAN:\n");
+        fwrite(STDOUT, " - /lan/demo-lan-solo (auto-enroll: Demo LAN Solo A/B)\n");
         fwrite(STDOUT, "Admin demo user: dd_admin (role admin)\n");
         fwrite(STDOUT, "Password for all demo users: password123\n");
     }
@@ -203,6 +232,19 @@ final class DemoSeeder
         }
 
         return $this->tRepo->create($ownerUserId, $gameId, $gameName, $name, $format, $participantType, $teamSize, $teamMatchMode, $status, null);
+    }
+
+    private function ensureLanEvent(string $name, int $ownerUserId, string $participantType, string $status): int
+    {
+        $stmt = $this->pdo->prepare('SELECT id FROM lan_events WHERE name = :name LIMIT 1');
+        $stmt->execute(['name' => $name]);
+        $id = $stmt->fetchColumn();
+        $id = is_int($id) || is_string($id) ? (int)$id : 0;
+        if ($id > 0) {
+            return $id;
+        }
+
+        return $this->lanRepo->create($ownerUserId, $name, $participantType, $status, null, null, null, null);
     }
 
     private function seedSoloPlayers(int $tournamentId, string $prefix, int $count, string $pwHash): void

@@ -10,6 +10,7 @@ use DuelDesk\Repositories\TeamMemberRepository;
 use DuelDesk\Repositories\TeamRepository;
 use DuelDesk\Repositories\TournamentRepository;
 use DuelDesk\Repositories\TournamentTeamRepository;
+use DuelDesk\Repositories\LanEventRepository;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
 use DuelDesk\Support\Discord;
@@ -36,6 +37,14 @@ final class TournamentTeamController
         $t = $tRepo->findById($tournamentId);
         if ($t === null) {
             Response::notFound();
+        }
+
+        $lanEventId = (int)($t['lan_event_id'] ?? 0);
+        if ($lanEventId > 0) {
+            $le = (new LanEventRepository())->findById($lanEventId);
+            $lanSlug = is_array($le) ? (string)($le['slug'] ?? '') : '';
+            Flash::set('error', "Ce tournoi fait partie d'un LAN: cree/rejoins ton equipe depuis le LAN.");
+            Response::redirect($lanSlug !== '' ? ('/lan/' . $lanSlug) : '/lan');
         }
 
         if (($t['participant_type'] ?? 'solo') !== 'team') {
@@ -145,6 +154,14 @@ final class TournamentTeamController
         $t = $tRepo->findById($tournamentId);
         if ($t === null) {
             Response::notFound();
+        }
+
+        $lanEventId = (int)($t['lan_event_id'] ?? 0);
+        if ($lanEventId > 0) {
+            $le = (new LanEventRepository())->findById($lanEventId);
+            $lanSlug = is_array($le) ? (string)($le['slug'] ?? '') : '';
+            Flash::set('error', "Ce tournoi fait partie d'un LAN: rejoins ton equipe depuis le LAN.");
+            Response::redirect($lanSlug !== '' ? ('/lan/' . $lanSlug) : '/lan');
         }
 
         if (($t['participant_type'] ?? 'solo') !== 'team') {
@@ -262,6 +279,14 @@ final class TournamentTeamController
         $t = $tRepo->findById($tournamentId);
         if ($t === null) {
             Response::notFound();
+        }
+
+        $lanEventId = (int)($t['lan_event_id'] ?? 0);
+        if ($lanEventId > 0) {
+            $le = (new LanEventRepository())->findById($lanEventId);
+            $lanSlug = is_array($le) ? (string)($le['slug'] ?? '') : '';
+            Flash::set('error', "Ce tournoi fait partie d'un LAN: gere ton equipe depuis le LAN.");
+            Response::redirect($lanSlug !== '' ? ('/lan/' . $lanSlug) : '/lan');
         }
 
         if (($t['participant_type'] ?? 'solo') !== 'team') {

@@ -27,6 +27,7 @@ $format = (string)($tournament['format'] ?? 'single_elim');
 $lanEventName = is_string($tournament['lan_event_name'] ?? null) ? trim((string)$tournament['lan_event_name']) : '';
 $lanEventSlug = is_string($tournament['lan_event_slug'] ?? null) ? trim((string)$tournament['lan_event_slug']) : '';
 $lanEventHref = $lanEventSlug !== '' ? ('/lan/' . $lanEventSlug) : '';
+$isLanTournament = $lanEventSlug !== '';
 
 $publicPath = $slug !== '' ? ('/t/' . $slug) : ('/tournaments/' . $tid);
 if ($lanEventSlug !== '' && $slug !== '') {
@@ -288,6 +289,10 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                     <span class="meta__dot" aria-hidden="true"></span>
                     <span class="muted"><?= View::e($signupHint) ?></span>
                 <?php endif; ?>
+                <?php if ($isLanTournament && $lanEventHref !== ''): ?>
+                    <span class="meta__dot" aria-hidden="true"></span>
+                    <span class="muted">inscriptions via <a class="link" href="<?= View::e($lanEventHref) ?>">LAN</a></span>
+                <?php endif; ?>
             </p>
         </div>
 
@@ -295,6 +300,9 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
             <?php if (!Auth::check()): ?>
                 <a class="btn btn--primary" href="/login?redirect=<?= View::e(urlencode($publicPath)) ?>">Se connecter</a>
             <?php else: ?>
+                <?php if ($isLanTournament && $lanEventHref !== ''): ?>
+                    <a class="btn btn--primary" href="<?= View::e($lanEventHref) ?>">S'inscrire au LAN</a>
+                <?php else: ?>
                 <?php if ($participantType === 'team'): ?>
                     <?php if ($isSignedUp && is_array($meTeam)): ?>
                         <?php if ($canLeaveTeam): ?>
@@ -335,13 +343,21 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                         <span class="muted"><?= View::e($msg) ?></span>
                     <?php endif; ?>
                 <?php endif; ?>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>
 
     <div class="card__body">
+        <?php if ($isLanTournament && $lanEventHref !== ''): ?>
+            <div class="empty empty--compact">
+                <div class="empty__title">Inscription via LAN</div>
+                <div class="empty__hint">Ce tournoi est rattache a un LAN: utilise la page LAN pour t'inscrire (auto-inscription a tous les tournois du LAN).</div>
+            </div>
+        <?php endif; ?>
+
         <?php if ($participantType === 'team'): ?>
-            <?php if (Auth::check() && !$isSignedUp && ($canCreateTeam || $canJoinTeam)): ?>
+            <?php if (!$isLanTournament && Auth::check() && !$isSignedUp && ($canCreateTeam || $canJoinTeam)): ?>
                 <?php $wrapClass = ($canCreateTeam && $canJoinTeam) ? 'split' : ''; ?>
                 <div class="<?= View::e($wrapClass) ?>">
                     <?php if ($canCreateTeam): ?>
@@ -382,7 +398,7 @@ function render_matchcard(array $m, string $participantType, string $tag, ?int $
                         </form>
                     <?php endif; ?>
                 </div>
-            <?php elseif (Auth::check() && $isSignedUp && is_array($meTeam)): ?>
+            <?php elseif (!$isLanTournament && Auth::check() && $isSignedUp && is_array($meTeam)): ?>
                 <div class="empty empty--compact">
                     <div class="empty__title">Ton equipe: <a class="link" href="/teams/<?= (int)($meTeam['id'] ?? 0) ?>"><?= View::e((string)$meTeam['name']) ?></a></div>
                     <div class="empty__hint">

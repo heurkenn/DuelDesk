@@ -9,6 +9,7 @@ use DuelDesk\Repositories\MatchRepository;
 use DuelDesk\Repositories\PlayerRepository;
 use DuelDesk\Repositories\TournamentPlayerRepository;
 use DuelDesk\Repositories\TournamentRepository;
+use DuelDesk\Repositories\LanEventRepository;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
 use DuelDesk\Support\Discord;
@@ -35,6 +36,14 @@ final class TournamentSignupController
         $t = $tRepo->findById($tournamentId);
         if ($t === null) {
             Response::notFound();
+        }
+
+        $lanEventId = (int)($t['lan_event_id'] ?? 0);
+        if ($lanEventId > 0) {
+            $le = (new LanEventRepository())->findById($lanEventId);
+            $lanSlug = is_array($le) ? (string)($le['slug'] ?? '') : '';
+            Flash::set('error', "Ce tournoi fait partie d'un LAN: inscris-toi au LAN.");
+            Response::redirect($lanSlug !== '' ? ('/lan/' . $lanSlug) : '/lan');
         }
 
         if (($t['participant_type'] ?? 'solo') === 'team') {
@@ -131,6 +140,14 @@ final class TournamentSignupController
         $t = $tRepo->findById($tournamentId);
         if ($t === null) {
             Response::notFound();
+        }
+
+        $lanEventId = (int)($t['lan_event_id'] ?? 0);
+        if ($lanEventId > 0) {
+            $le = (new LanEventRepository())->findById($lanEventId);
+            $lanSlug = is_array($le) ? (string)($le['slug'] ?? '') : '';
+            Flash::set('error', "Ce tournoi fait partie d'un LAN: gerer l'inscription depuis le LAN.");
+            Response::redirect($lanSlug !== '' ? ('/lan/' . $lanSlug) : '/lan');
         }
 
         if (($t['participant_type'] ?? 'solo') === 'team') {

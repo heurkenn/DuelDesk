@@ -105,4 +105,70 @@ try {
     // Best-effort: ignore if table doesn't exist yet or permissions are restricted.
 }
 
+// LAN registrations tables (introduced after the initial schema squash).
+try {
+    $exists = $pdo->query("SHOW TABLES LIKE 'lan_players'")->fetchColumn();
+    if (!$exists) {
+        fwrite(STDOUT, "Creating LAN registration tables...\n");
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS lan_players ("
+            . " lan_event_id BIGINT UNSIGNED NOT NULL,"
+            . " user_id BIGINT UNSIGNED NOT NULL,"
+            . " joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            . " PRIMARY KEY (lan_event_id, user_id),"
+            . " KEY idx_lan_players_user_id (user_id),"
+            . " CONSTRAINT fk_lan_players_event FOREIGN KEY (lan_event_id) REFERENCES lan_events(id) ON DELETE CASCADE,"
+            . " CONSTRAINT fk_lan_players_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+            . ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS lan_teams ("
+            . " id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+            . " lan_event_id BIGINT UNSIGNED NOT NULL,"
+            . " name VARCHAR(80) NOT NULL,"
+            . " slug VARCHAR(120) NOT NULL,"
+            . " join_code CHAR(10) NOT NULL,"
+            . " created_by_user_id BIGINT UNSIGNED NULL,"
+            . " created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            . " updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+            . " PRIMARY KEY (id),"
+            . " UNIQUE KEY uniq_lan_teams_join_code (join_code),"
+            . " UNIQUE KEY uniq_lan_teams_event_slug (lan_event_id, slug),"
+            . " KEY idx_lan_teams_event_id (lan_event_id),"
+            . " KEY idx_lan_teams_created_by (created_by_user_id),"
+            . " CONSTRAINT fk_lan_teams_event FOREIGN KEY (lan_event_id) REFERENCES lan_events(id) ON DELETE CASCADE,"
+            . " CONSTRAINT fk_lan_teams_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL"
+            . ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS lan_team_members ("
+            . " lan_team_id BIGINT UNSIGNED NOT NULL,"
+            . " user_id BIGINT UNSIGNED NOT NULL,"
+            . " role ENUM('captain','member') NOT NULL DEFAULT 'member',"
+            . " joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            . " PRIMARY KEY (lan_team_id, user_id),"
+            . " KEY idx_lan_team_members_user_id (user_id),"
+            . " CONSTRAINT fk_lan_team_members_team FOREIGN KEY (lan_team_id) REFERENCES lan_teams(id) ON DELETE CASCADE,"
+            . " CONSTRAINT fk_lan_team_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+            . ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS lan_team_tournament_teams ("
+            . " lan_team_id BIGINT UNSIGNED NOT NULL,"
+            . " tournament_id BIGINT UNSIGNED NOT NULL,"
+            . " team_id BIGINT UNSIGNED NOT NULL,"
+            . " created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            . " PRIMARY KEY (lan_team_id, tournament_id),"
+            . " UNIQUE KEY uniq_ltt_team_id (team_id),"
+            . " KEY idx_ltt_tournament_id (tournament_id),"
+            . " CONSTRAINT fk_ltt_lan_team FOREIGN KEY (lan_team_id) REFERENCES lan_teams(id) ON DELETE CASCADE,"
+            . " CONSTRAINT fk_ltt_tournament FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE,"
+            . " CONSTRAINT fk_ltt_team FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE"
+            . ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+    }
+} catch (Throwable) {
+    // Best-effort.
+}
+
 fwrite(STDOUT, $ran === 0 ? "Nothing to do.\n" : "Done. Applied {$ran} migration(s).\n");

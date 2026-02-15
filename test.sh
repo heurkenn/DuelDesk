@@ -209,6 +209,29 @@ code="$(http_get_auth "$BASE_URL/admin" "$ADMIN_HTML")"
 assert_code "$code" "200"
 assert_contains "$ADMIN_HTML" "Dashboard"
 
+info "LAN: signup registers and auto-enrolls to all tournaments in the LAN (admin bypass)"
+LAN_HTML="$TMP_DIR/lan.html"
+code="$(http_get_auth "$BASE_URL/lan/demo-lan-solo" "$LAN_HTML")"
+assert_code "$code" "200"
+assert_contains "$LAN_HTML" "Inscription"
+csrf="$(extract_csrf "$LAN_HTML")"
+[[ -n "$csrf" ]] || fail "could not extract csrf from /lan/demo-lan-solo"
+
+LAN_SIGNUP_POST="$TMP_DIR/lan_signup.post"
+write_form "$LAN_SIGNUP_POST" "csrf_token=$(urlencode "$csrf")"
+LAN_SIGNUP_OUT="$TMP_DIR/lan_signup.out"
+LAN_SIGNUP_HDR="$TMP_DIR/lan_signup.hdr"
+code="$(http_post_auth "$BASE_URL/lan/demo-lan-solo/signup" "$LAN_SIGNUP_POST" "$LAN_SIGNUP_OUT" "$LAN_SIGNUP_HDR")"
+assert_code_any "$code" "302" "303"
+
+info "LAN: tournaments in LAN are hidden from /tournaments"
+LAN_TOUR_HTML="$TMP_DIR/lan_tour.html"
+code="$(http_get_auth "$BASE_URL/tournaments" "$LAN_TOUR_HTML")"
+assert_code "$code" "200"
+if rg -n --fixed-strings "Demo LAN Solo A (inscriptions)" "$LAN_TOUR_HTML" >/dev/null 2>&1; then
+  fail "LAN tournament leaked into /tournaments list"
+fi
+
 info "Check 2XKO crew tournament page contains crew battle section (lineup_duels)"
 X2KO_HTML="$TMP_DIR/2xko.html"
 code="$(http_get_auth "$BASE_URL/tournaments" "$X2KO_HTML")"

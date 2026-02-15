@@ -7,6 +7,12 @@ namespace DuelDesk\Controllers;
 use DuelDesk\Http\Response;
 use DuelDesk\Repositories\LanEventRepository;
 use DuelDesk\Repositories\TournamentRepository;
+use DuelDesk\Repositories\LanPlayerRepository;
+use DuelDesk\Repositories\LanTeamRepository;
+use DuelDesk\Repositories\MatchRepository;
+use DuelDesk\Repositories\TournamentPlayerRepository;
+use DuelDesk\Repositories\TournamentTeamRepository;
+use DuelDesk\Services\LanEnrollmentService;
 use DuelDesk\Support\Auth;
 use DuelDesk\Support\Csrf;
 use DuelDesk\Support\Flash;
@@ -242,7 +248,38 @@ final class AdminLanEventController
             Response::redirect('/admin/lan/' . $id);
         }
 
+        // Safety: avoid attaching a "live" tournament to a LAN that already has registrants,
+        // because it would be ambiguous how to reconcile entrants.
+        $hasRegistrants = false;
+        if ($eventType === 'solo') {
+            $hasRegistrants = (new LanPlayerRepository())->listUserIds($id) !== [];
+        } else {
+            $hasRegistrants = (new LanTeamRepository())->listByLanEventId($id) !== [];
+        }
+
+        if ($hasRegistrants) {
+            $mRepo = new MatchRepository();
+            $hasMatches = $mRepo->countForTournament($tournamentId) > 0;
+            $hasEntrants = $eventType === 'team'
+                ? ((new TournamentTeamRepository())->countForTournament($tournamentId) > 0)
+                : ((new TournamentPlayerRepository())->countForTournament($tournamentId) > 0);
+
+            if ($hasMatches || $hasEntrants) {
+                Flash::set('error', 'Impossible: ce LAN a deja des inscrits, et ce tournoi a deja un bracket ou des entrants.');
+                Response::redirect('/admin/lan/' . $id);
+            }
+        }
+
         $tRepo->updateLanEvent($tournamentId, $id);
+
+        // Backfill: auto-enroll existing LAN registrants into this newly attached tournament.
+        try {
+            (new LanEnrollmentService())->backfillTournament($event, $t, isAdmin: true);
+        } catch (\Throwable $e) {
+            // If something goes wrong, keep the attach but surface the issue to the admin.
+            Flash::set('error', 'Tournoi attache, mais backfill impossible: ' . ($e->getMessage() ?: 'erreur'));
+            Response::redirect('/admin/lan/' . $id);
+        }
 
         Flash::set('success', 'Tournoi ajoute au LAN.');
         Response::redirect('/admin/lan/' . $id);
